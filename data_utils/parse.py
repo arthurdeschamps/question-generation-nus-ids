@@ -9,6 +9,6 @@ def parse_squad_example(raw_example):
 
 def read_square_dataset(dataset_path: str):
     ds = pd.read_json(dataset_path)
-    ds = ds["data"]
+    ds = ds["data"][:10]
     ds = list(parse_squad_example(example) for example in ds)
     return ds

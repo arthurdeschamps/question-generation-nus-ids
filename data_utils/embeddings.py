@@ -1,5 +1,7 @@
 from typing import List
-
+import numpy as np
+import tensorflow as tf
+from tensorflow_core import Variable
 from transformers import BertTokenizer, TFBertModel
 from data_utils.class_defs import Paragraph, SquadExample, Question
 
@@ -18,8 +20,14 @@ class Embedder:
             'additional_special_tokens': [Embedder.HL_TOKEN]
         })
 
-    def generate_next_tokens(self, prev_tokens, predicted_word):
-        return prev_tokens[:-1] + self.tokenizer.encode(predicted_word, add_special_tokens=False) + [prev_tokens[-1]]
+    @staticmethod
+    def generate_next_tokens(prev_tokens: Variable, predicted_token: Variable):
+        res = tf.concat((
+            tf.expand_dims(prev_tokens[:-1], axis=0),
+            tf.reshape(predicted_token, shape=(1, 1)),
+            tf.reshape(prev_tokens[-1], shape=(1, 1))
+        ), axis=1)
+        return tf.squeeze(res)
 
     def generate_bert_hlsqg_input_embedding(self, context, answer):
         context_lhs_tokens = self.tokenizer.tokenize(context[:answer.answer_start])
@@ -37,15 +45,14 @@ class Embedder:
             self.tokenizer.sep_token,
             self.tokenizer.mask_token
         )
-        encoded_tokens = self.tokenizer.encode(tokens, add_special_tokens=False)
-        print(encoded_tokens)
-        return encoded_tokens
+        return self.tokenizer.encode(tokens, add_special_tokens=False)
 
     def generate_bert_hlsqg_output_embedding(self, question: Question):
         return self.tokenizer.encode(self.tokenizer.tokenize(question.question))
 
     def generate_bert_hlsqg_dataset(self, squad_examples: List[SquadExample]):
-        ds = []
+        x = []
+        y = []
         for squad_example in squad_examples:
             for paragraph in squad_example.paragraphs:
                 for qa in paragraph.qas:
@@ -56,11 +63,13 @@ class Embedder:
                     answers = qa[1]
                     if len(answers) > 0:  # Makes sure the question in answerable
                         for answer in answers:
-                            ds.append((
-                                self.generate_bert_hlsqg_input_embedding(paragraph.context, answer),
-                                self.generate_bert_hlsqg_output_embedding(question)
-                            ))
-        return ds
+                            input_emb = self.generate_bert_hlsqg_input_embedding(paragraph.context, answer)
+                            label_emb = self.generate_bert_hlsqg_output_embedding(question)
+                            # Maximum sequence length of this model
+                            if len(input_emb) <= 512:
+                                x.append(np.array(input_emb, dtype=np.int))
+                                y.append(np.array(label_emb, dtype=np.int))
+        return x, y
 
     def vocab_size(self):
         return self.tokenizer.vocab_size
