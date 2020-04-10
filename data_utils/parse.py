@@ -7,8 +7,8 @@ def parse_squad_example(raw_example):
     return SquadExample.from_json(raw_example)
 
 
-def read_square_dataset(dataset_path: str):
+def read_square_dataset(dataset_path: str, limit=-1):
     ds = pd.read_json(dataset_path)
-    ds = ds["data"][:10]
+    ds = ds["data"][:limit]
     ds = list(parse_squad_example(example) for example in ds)
     return ds

@@ -7,7 +7,6 @@ from data_utils.class_defs import Paragraph, SquadExample, Question
 
 
 class Embedder:
-
     HL_TOKEN = '[unused1]'  # This token is used to indicate where the answer starts and finishes
 
     def __init__(self):
@@ -21,13 +20,25 @@ class Embedder:
         })
 
     @staticmethod
-    def generate_next_tokens(prev_tokens: Variable, predicted_token: Variable):
-        res = tf.concat((
-            tf.expand_dims(prev_tokens[:-1], axis=0),
-            tf.reshape(predicted_token, shape=(1, 1)),
-            tf.reshape(prev_tokens[-1], shape=(1, 1))
-        ), axis=1)
-        return tf.squeeze(res)
+    def generate_next_input_tokens(prev_tokens: tf.Tensor,
+                                   predicted_tokens: tf.Tensor,
+                                   padding_token: tf.Tensor):
+        non_padding_indices = tf.not_equal(prev_tokens, padding_token)
+        sizes = tf.unstack(tf.cast(tf.reduce_sum(tf.cast(non_padding_indices, dtype=tf.int32), axis=1), dtype=tf.int32))
+        unstacked_predicted_tokens = tf.unstack(predicted_tokens)
+        old_input_tokens = tf.unstack(prev_tokens)
+        new_input_tokens = []
+        for old_input, input_end, predicted_token in zip(old_input_tokens, sizes, unstacked_predicted_tokens):
+            new_input_tokens.append(
+                tf.concat(
+                    (old_input[:input_end - 1],  # this is the tokens we had so far (without mask)
+                     tf.expand_dims(predicted_token, axis=0),  # this is our newly introduced token
+                     tf.expand_dims(old_input[input_end - 1], axis=0),  # this corresponds to the mask token
+                     old_input[input_end:]),  # finally, adds back the paddings to make sure we have a rectangular ds
+                    axis=0
+                )
+            )
+        return tf.stack(new_input_tokens, axis=0)
 
     def generate_bert_hlsqg_input_embedding(self, context, answer):
         context_lhs_tokens = self.tokenizer.tokenize(context[:answer.answer_start])
@@ -48,7 +59,7 @@ class Embedder:
         return self.tokenizer.encode(tokens, add_special_tokens=False)
 
     def generate_bert_hlsqg_output_embedding(self, question: Question):
-        return self.tokenizer.encode(self.tokenizer.tokenize(question.question))
+        return self.tokenizer.encode(self.tokenizer.tokenize(question.question), add_special_tokens=False)
 
     def generate_bert_hlsqg_dataset(self, squad_examples: List[SquadExample]):
         x = []
@@ -67,8 +78,8 @@ class Embedder:
                             label_emb = self.generate_bert_hlsqg_output_embedding(question)
                             # Maximum sequence length of this model
                             if len(input_emb) <= 512:
-                                x.append(np.array(input_emb, dtype=np.int))
-                                y.append(np.array(label_emb, dtype=np.int))
+                                x.append(np.array(input_emb, dtype=np.int32))
+                                y.append(np.array(label_emb, dtype=np.int32))
         return x, y
 
     def vocab_size(self):
@@ -76,4 +87,3 @@ class Embedder:
 
     def vocab_lookup(self, predicted_tokens):
         return self.tokenizer.decode(predicted_tokens)
-
