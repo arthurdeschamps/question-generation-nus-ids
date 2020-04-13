@@ -196,7 +196,9 @@ dmypy.json
 
 # End of https://www.gitignore.io/api/python,pycharm
 
-bert
-nqg
+
+models/nqg
 squad_2_dataset
 bert_model
+trained
+list_models.sh

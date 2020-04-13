@@ -7,6 +7,9 @@
     <orderEntry type="jdk" jdkName="Remote Python 3.7.7 (sftp://arthur@172.27.142.165:22/home/arthur/anaconda3/envs/tensorflow_env/bin/python)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
+  <component name="PyDocumentationSettings">
+    <option name="renderExternalDocumentation" value="true" />
+  </component>
   <component name="TestRunnerService">
     <option name="PROJECT_TEST_RUNNER" value="pytest" />
   </component>

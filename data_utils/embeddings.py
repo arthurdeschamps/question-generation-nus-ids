@@ -1,18 +1,21 @@
 from typing import List
 import numpy as np
 import tensorflow as tf
-from tensorflow_core import Variable
-from transformers import BertTokenizer, TFBertModel
-from data_utils.class_defs import Paragraph, SquadExample, Question
+from transformers import BertTokenizer
+from data_utils.class_defs import SquadExample, Question
 
 
 class Embedder:
     HL_TOKEN = '[unused1]'  # This token is used to indicate where the answer starts and finishes
 
-    def __init__(self):
+    def __init__(self, pretrained_model_name):
         super(Embedder, self).__init__()
-        self.pretrained_weights_name = 'bert-base-uncased'
+        self.pretrained_weights_name = pretrained_model_name
         self.tokenizer = BertTokenizer.from_pretrained(self.pretrained_weights_name)
+
+        self.padding_token = tf.constant(self.tokenizer.pad_token_id, dtype=tf.int32)
+        self.mask_token = tf.constant(self.tokenizer.mask_token_id, dtype=tf.int32)
+        self.sep_token = tf.constant(self.tokenizer.sep_token_id, dtype=tf.int32)
 
         # Token to indicate where the answer resides in the context
         self.tokenizer.add_special_tokens({
@@ -61,7 +64,9 @@ class Embedder:
     def generate_bert_hlsqg_output_embedding(self, question: Question):
         return self.tokenizer.encode(self.tokenizer.tokenize(question.question), add_special_tokens=False)
 
-    def generate_bert_hlsqg_dataset(self, squad_examples: List[SquadExample]):
+    def generate_bert_hlsqg_dataset(self, squad_examples: List[SquadExample],
+                                    max_sequence_length,
+                                    max_generated_question_length):
         x = []
         y = []
         for squad_example in squad_examples:
@@ -77,7 +82,7 @@ class Embedder:
                             input_emb = self.generate_bert_hlsqg_input_embedding(paragraph.context, answer)
                             label_emb = self.generate_bert_hlsqg_output_embedding(question)
                             # Maximum sequence length of this model
-                            if len(input_emb) <= 512:
+                            if len(input_emb) <= max_sequence_length - max_generated_question_length:
                                 x.append(np.array(input_emb, dtype=np.int32))
                                 y.append(np.array(label_emb, dtype=np.int32))
         return x, y

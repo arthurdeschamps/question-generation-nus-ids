@@ -1,31 +1,31 @@
-from functools import reduce
-from typing import List
 import numpy as np
 from transformers import TFBertModel as BertModel
 from data_utils.embeddings import Embedder
 import tensorflow as tf
-from tensorflow.keras import Model
+from models.base_model import BaseModel
 
 
-class Bert(Model):
+class Bert(BaseModel):
 
-    def __init__(self, max_sequence_length=20, beam_search_size=3):
+    def __init__(self, embedder: Embedder,
+                 max_generated_question_length=20,
+                 beam_search_size=3,
+                 max_sequence_length=512,
+                 hidden_state_size=768):
         """
         :param max_sequence_length: Maximum length of any generated question.
         :param beam_search_size: Number of beams to keep in memory during beach search.
         """
         super(Bert, self).__init__()
-        self.max_sequence_length = tf.constant(max_sequence_length, dtype=tf.int32)
+        self.max_generated_question_length = tf.constant(max_generated_question_length, dtype=tf.int32)
         self.beam_search_size = beam_search_size
-        self.embedder = Embedder()
-        self.pretrained_weights_name = 'bert-base-uncased'
+        self.embedder = embedder
+        self.pretrained_weights_name = embedder.pretrained_weights_name
         self.model = BertModel.from_pretrained(self.pretrained_weights_name)
-        self.padding_token = tf.constant(self.embedder.tokenizer.pad_token_id, dtype=tf.int32)
-        self.mask_token = tf.constant(self.embedder.tokenizer.mask_token_id, dtype=tf.int32)
-        self.sep_token = tf.constant(self.embedder.tokenizer.sep_token_id, dtype=tf.int32)
+        self.max_sequence_length = max_sequence_length
 
         initializer = tf.initializers.glorot_uniform()
-        hidden_state_size = 768
+        hidden_state_size = hidden_state_size
 
         self.W_sqg = tf.Variable(shape=(hidden_state_size, self.embedder.vocab_size()),
                                  dtype=tf.float32,
@@ -35,48 +35,47 @@ class Bert(Model):
                                  dtype=tf.float32,
                                  trainable=True,
                                  initial_value=initializer(shape=(1, self.embedder.vocab_size())))
+        self.beams_probs = tf.Variable(np.zeros(shape=(self.beam_search_size,)), dtype=tf.float32, trainable=False)
+        self.ite = tf.Variable(0, dtype=tf.int32, trainable=False)
 
     def call(self, tokens, training=False, mask=None):
         if training is None or training:
             raise ValueError("Only call this function for evaluation/testing")
         beams_tensors = tf.concat(list(tf.identity(tokens) for _ in range(self.beam_search_size)), axis=0)
         # initialize all likelihoods to 0 except 1 to introduce diversity to the first loop
-        initial_probs = np.zeros(shape=(self.beam_search_size,))
-        initial_probs[0] = 1.0
-        beams_probs = tf.Variable(initial_probs, dtype=tf.float32)
-        i = tf.Variable(0, dtype=tf.int32)
+        self.beams_probs.assign(np.zeros((self.beam_search_size,)))
+        self.beams_probs[0].assign(1.0)
 
-        def compute_next_beams(ite, current_beams, current_beam_probs):
-            beams_hidden_states = self.model(current_beams)[0]
-            mask_states = beams_hidden_states[:, -1]
-            word_distributions = tf.math.softmax(tf.add(tf.matmul(mask_states, self.W_sqg), self.b_sqg))
-            top_preds_probs, top_preds_indices = tf.math.top_k(word_distributions, k=self.beam_search_size)
-            new_beams = []
-            new_beams_probs = []
-            for j in range(self.beam_search_size):
-                new_beams.extend(tf.unstack(self.embedder.generate_next_input_tokens(current_beams,
-                                                                                     top_preds_indices[j],
-                                                                                     padding_token=self.padding_token)))
-                new_beams_probs.extend(tf.unstack(tf.multiply(current_beam_probs, top_preds_probs[j])))
-            current_beam_probs, top_beams_indices = tf.math.top_k(new_beams_probs, k=self.beam_search_size)
-            current_beams = tf.gather(tf.Variable(new_beams, dtype=tf.int32), top_beams_indices)
-            current_beams.set_shape([self.beam_search_size, None])
-            return tf.add(ite, 1), current_beams, current_beam_probs
+        self.ite.assign(0)
 
         nb_generated_tokens, beams_tensors, final_beam_probs = tf.while_loop(
             lambda ite, current_beams, _: tf.logical_and(
-                tf.less(ite, self.max_sequence_length),
+                tf.less(ite, self.max_generated_question_length),
                 self._no_sep_token(current_beams)
             ),
-            compute_next_beams,
-            loop_vars=[i, beams_tensors, beams_probs]
+            self._compute_next_beams,
+            loop_vars=[self.ite, beams_tensors, self.beams_probs],
+            shape_invariants=[self.ite.shape, tf.TensorShape((3, None)), self.beams_probs.shape]
         )
 
-        # Only takes the generated tokens
         best_beam = beams_tensors[tf.argmax(final_beam_probs, axis=0)]
-        without_padding = tf.gather(best_beam, indices=tf.where(tf.not_equal(best_beam, self.padding_token)), axis=0)
-        generated_question = without_padding[-nb_generated_tokens:]
-        return generated_question
+        # Get rid of the special tokens
+        without_special_tokens = tf.reshape(tf.gather(
+            best_beam,
+            indices=tf.where(
+                tf.logical_and(
+                    tf.not_equal(best_beam, self.embedder.padding_token),
+                    tf.not_equal(best_beam, self.embedder.mask_token)
+                )
+            ),
+            axis=0
+        ), shape=(-1,))
+        generated_question = without_special_tokens[-nb_generated_tokens:]
+        # Gets rid of any potential SEP token
+        return tf.reshape(tf.gather(
+            generated_question,
+            indices=tf.where(tf.not_equal(generated_question, self.embedder.mask_token))
+        ), shape=(-1,))
 
     def step(self, tokens, correct_output_tokens, step=tf.Variable(0, dtype=tf.int32)):
         """
@@ -95,12 +94,30 @@ class Bert(Model):
         new_input_tokens = self.embedder.generate_next_input_tokens(
             tokens,
             correct_next_outputs,
-            padding_token=self.padding_token
+            padding_token=self.embedder.padding_token
         )
         return word_distributions, correct_next_outputs, new_input_tokens
 
+    def _compute_next_beams(self, ite, current_beams, current_beam_probs):
+        beams_hidden_states = self.model(current_beams)[0]
+        mask_states = beams_hidden_states[:, -1]
+        word_distributions = tf.math.softmax(tf.add(tf.matmul(mask_states, self.W_sqg), self.b_sqg))
+        top_preds_probs, top_preds_indices = tf.math.top_k(word_distributions, k=self.beam_search_size)
+        new_beams = []
+        new_beams_probs = []
+        for j in range(self.beam_search_size):
+            new_beams.extend(
+                tf.unstack(self.embedder.generate_next_input_tokens(current_beams,
+                                                                    top_preds_indices[j],
+                                                                    padding_token=self.embedder.padding_token)))
+            new_beams_probs.extend(tf.unstack(tf.multiply(current_beam_probs, top_preds_probs[j])))
+        current_beam_probs, top_beams_indices = tf.math.top_k(new_beams_probs, k=self.beam_search_size)
+        current_beams = tf.gather(new_beams, top_beams_indices)
+        current_beams.set_shape([self.beam_search_size, None])
+        return tf.add(ite, 1), current_beams, current_beam_probs
+
     def _no_sep_token(self, beams):
-        sep_locations = tf.equal(tf.squeeze(beams), self.sep_token)
+        sep_locations = tf.equal(tf.squeeze(beams), self.embedder.sep_token)
         res = tf.reduce_sum(
             tf.reduce_sum(tf.cast(sep_locations, dtype=tf.int32), axis=0),
             axis=0
