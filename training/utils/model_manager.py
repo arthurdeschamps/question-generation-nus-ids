@@ -1,6 +1,6 @@
 import time
 import tensorflow as tf
-from defs import TRAINED_MODELS_DIR
+from defs import TRAINED_MODELS_DIR, PRETRAINED_MODELS_DIR
 
 
 class ModelManager:
@@ -17,6 +17,11 @@ class ModelManager:
     @staticmethod
     def load_model(model: tf.keras.Model, model_name):
         model.load_weights(ModelManager._model_filepath(model_name))
+        return model
+
+    @staticmethod
+    def load_pretrained_model(model, model_name):
+        model.load_weights(f"{PRETRAINED_MODELS_DIR}/{model_name}")
         return model
 
     @staticmethod

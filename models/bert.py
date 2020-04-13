@@ -1,5 +1,4 @@
 import numpy as np
-from transformers import TFBertModel as BertModel
 from data_utils.embeddings import Embedder
 import tensorflow as tf
 from models.base_model import BaseModel
@@ -10,7 +9,9 @@ class Bert(BaseModel):
     BERT implementation of this fine-tuning architecture: https://www.aclweb.org/anthology/D19-5821.pdf.
     """
 
-    def __init__(self, embedder: Embedder,
+    def __init__(self,
+                 embedder: Embedder,
+                 model,
                  max_generated_question_length=20,
                  beam_search_size=3,
                  max_sequence_length=512,
@@ -27,7 +28,7 @@ class Bert(BaseModel):
         self.beam_search_size = beam_search_size
         self.embedder = embedder
         self.pretrained_weights_name = embedder.pretrained_weights_name
-        self.model = BertModel.from_pretrained(self.pretrained_weights_name)
+        self.model = model
         self.max_sequence_length = max_sequence_length
 
         initializer = tf.initializers.glorot_uniform()

@@ -44,7 +44,6 @@ class Trainer:
                 loss = self.train_loss_object(padding_free_outputs, padding_free_distributions)
 
             def compute_and_apply_gradients():
-                tf.print("Computing gradient - Token number ", i)
                 gradients = tape.gradient(loss, self.model.trainable_variables)
                 self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
                 self.train_loss(loss)
@@ -52,7 +51,7 @@ class Trainer:
 
             # Only backpropagates for non padding outputs
             tf.cond(
-                tf.greater(padding_free_outputs.shape[1], tf.constant(0)),
+                tf.greater(tf.size(padding_free_outputs), tf.constant(0)),
                 compute_and_apply_gradients,
                 lambda: None
             )

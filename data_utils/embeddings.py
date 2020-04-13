@@ -1,7 +1,6 @@
 from typing import List
 import numpy as np
 import tensorflow as tf
-from transformers import BertTokenizer
 from data_utils.class_defs import SquadExample, Question, Answer
 
 
@@ -11,10 +10,10 @@ class Embedder:
     """
     HL_TOKEN = '[unused1]'  # This token is used to indicate where the answer starts and finishes
 
-    def __init__(self, pretrained_model_name):
+    def __init__(self, pretrained_model_name, tokenizer):
         super(Embedder, self).__init__()
         self.pretrained_weights_name = pretrained_model_name
-        self.tokenizer = BertTokenizer.from_pretrained(self.pretrained_weights_name)
+        self.tokenizer = tokenizer
 
         self.padding_token = tf.constant(self.tokenizer.pad_token_id, dtype=tf.int32)
         self.mask_token = tf.constant(self.tokenizer.mask_token_id, dtype=tf.int32)
@@ -110,7 +109,7 @@ class Embedder:
                             input_emb = self.generate_bert_hlsqg_input_embedding(paragraph.context, answer)
                             label_emb = self.generate_bert_hlsqg_output_embedding(question)
                             # Maximum sequence length of this model
-                            if len(input_emb) <= max_sequence_length - max_generated_question_length:
+                            if len(input_emb) < max_sequence_length - max_generated_question_length:
                                 x.append(np.array(input_emb, dtype=np.int32))
                                 y.append(np.array(label_emb, dtype=np.int32))
         return x, y
