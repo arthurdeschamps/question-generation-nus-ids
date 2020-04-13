@@ -4,6 +4,9 @@ from training.utils.rouge_score import rouge_n
 
 
 class Trainer:
+    """
+    Use to train a model.
+    """
 
     def __init__(self, model,
                  train_loss_object=tf.losses.SparseCategoricalCrossentropy(from_logits=False),

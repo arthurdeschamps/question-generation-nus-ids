@@ -4,6 +4,9 @@ from defs import TRAINED_MODELS_DIR
 
 
 class ModelManager:
+    """
+    Use this class to save and load keras models.
+    """
 
     @staticmethod
     def save_model(model: tf.keras.Model, model_name=None):

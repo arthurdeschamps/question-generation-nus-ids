@@ -6,6 +6,9 @@ from models.base_model import BaseModel
 
 
 class Bert(BaseModel):
+    """
+    BERT implementation of this fine-tuning architecture: https://www.aclweb.org/anthology/D19-5821.pdf.
+    """
 
     def __init__(self, embedder: Embedder,
                  max_generated_question_length=20,
@@ -13,8 +16,11 @@ class Bert(BaseModel):
                  max_sequence_length=512,
                  hidden_state_size=768):
         """
+        :param max_generated_question_length: Limits the length of the generated questions to avoid infinite loops or
+        lengthy questions.
         :param max_sequence_length: Maximum length of any generated question.
         :param beam_search_size: Number of beams to keep in memory during beach search.
+        :param hidden_state_size: Number of hidden states generated at the output layer of the specific BERT model.
         """
         super(Bert, self).__init__()
         self.max_generated_question_length = tf.constant(max_generated_question_length, dtype=tf.int32)
@@ -27,6 +33,7 @@ class Bert(BaseModel):
         initializer = tf.initializers.glorot_uniform()
         hidden_state_size = hidden_state_size
 
+        # Simple linear layer used in conjunction with a softmax to output word distributions.
         self.W_sqg = tf.Variable(shape=(hidden_state_size, self.embedder.vocab_size()),
                                  dtype=tf.float32,
                                  trainable=True,
@@ -39,6 +46,15 @@ class Bert(BaseModel):
         self.ite = tf.Variable(0, dtype=tf.int32, trainable=False)
 
     def call(self, tokens, training=False, mask=None):
+        """
+        Generates a question from the given token sequence representing a paragraph.
+        :param tokens: A token sequence representing a paragraph. Shape should be (1, sequence_length) (that is,
+        batches are not accepted here).
+        :param training: This should always set to false as this function should only be called during
+        testing/validation.
+        :param mask: Not used.
+        :return: The generated question.
+        """
         if training is None or training:
             raise ValueError("Only call this function for evaluation/testing")
         beams_tensors = tf.concat(list(tf.identity(tokens) for _ in range(self.beam_search_size)), axis=0)
@@ -48,6 +64,8 @@ class Bert(BaseModel):
 
         self.ite.assign(0)
 
+        # Keeps computing most probably beams until either reaching the maximum question length or generating
+        # a SEP token (which indicates the end of the question).
         nb_generated_tokens, beams_tensors, final_beam_probs = tf.while_loop(
             lambda ite, current_beams, _: tf.logical_and(
                 tf.less(ite, self.max_generated_question_length),
@@ -79,11 +97,12 @@ class Bert(BaseModel):
 
     def step(self, tokens, correct_output_tokens, step=tf.Variable(0, dtype=tf.int32)):
         """
-        To use for teacher forcing training
-        :param tokens:
-        :param correct_output_tokens:
-        :param step:
-        :return:
+        To use for teacher forcing training.
+        :param tokens: A token sequence representing a context. Shape should be (batch_size, token_sequences_length).
+        :param correct_output_tokens: The correct question. Shape expected to be (batch_size, 1).
+        :param step: Pointer to the token being currently predicted.
+        :return: Distributions for the next words, the correct next outputs and new input tokens to use for the next
+        iteration.
         """
 
         correct_next_outputs = correct_output_tokens[:, step]
@@ -99,24 +118,33 @@ class Bert(BaseModel):
         return word_distributions, correct_next_outputs, new_input_tokens
 
     def _compute_next_beams(self, ite, current_beams, current_beam_probs):
+        """
+        Computes beams for the next iteration (beam search algorithm).
+        """
         beams_hidden_states = self.model(current_beams)[0]
         mask_states = beams_hidden_states[:, -1]
         word_distributions = tf.math.softmax(tf.add(tf.matmul(mask_states, self.W_sqg), self.b_sqg))
+        # Computes the most probable k words for each distribution.
         top_preds_probs, top_preds_indices = tf.math.top_k(word_distributions, k=self.beam_search_size)
         new_beams = []
         new_beams_probs = []
+        # Generates the next input sequences for every possible new token and calculates their likelihood.
         for j in range(self.beam_search_size):
             new_beams.extend(
                 tf.unstack(self.embedder.generate_next_input_tokens(current_beams,
                                                                     top_preds_indices[j],
                                                                     padding_token=self.embedder.padding_token)))
             new_beams_probs.extend(tf.unstack(tf.multiply(current_beam_probs, top_preds_probs[j])))
+        # Only keeps the k most probably sequences (out of k^2).
         current_beam_probs, top_beams_indices = tf.math.top_k(new_beams_probs, k=self.beam_search_size)
         current_beams = tf.gather(new_beams, top_beams_indices)
         current_beams.set_shape([self.beam_search_size, None])
         return tf.add(ite, 1), current_beams, current_beam_probs
 
     def _no_sep_token(self, beams):
+        """
+        :return: if a separation token has been generated by our model.
+        """
         sep_locations = tf.equal(tf.squeeze(beams), self.embedder.sep_token)
         res = tf.reduce_sum(
             tf.reduce_sum(tf.cast(sep_locations, dtype=tf.int32), axis=0),
