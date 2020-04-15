@@ -81,14 +81,18 @@ class Embedder:
         return self.tokenizer.encode(tokens, add_special_tokens=False)
 
     def generate_bert_hlsqg_output_embedding(self, question: Question):
-        # TODO: I don't think the outputs need to be encoded
-        return self.tokenizer.encode(self.tokenizer.tokenize(question.question), add_special_tokens=False)
+        output_tokens = self.tokenizer.encode(self.tokenizer.tokenize(question.question), add_special_tokens=False)
+        output_tokens.append(self.tokenizer.sep_token_id)
+        return output_tokens
 
-    def generate_bert_hlsqg_dataset(self, squad_examples: List[SquadExample],
+    def generate_bert_hlsqg_dataset(self,
+                                    squad_examples: List[SquadExample],
                                     max_sequence_length,
-                                    max_generated_question_length):
+                                    max_generated_question_length,
+                                    limit=-1):
         """
         Generates a dataset for the HLSQG Bert architecture using the given SQuAD examples.
+        :param limit: Number of datapoints to generate (-1 means no limit).
         :param squad_examples: A list of squad example objects.
         :param max_sequence_length: The maximum sequence length supported by the model to be used with this dataset.
         :param max_generated_question_length: The generated questions maximum length.
@@ -96,14 +100,15 @@ class Embedder:
         """
         x = []
         y = []
+        generated = 0
         for squad_example in squad_examples:
             for paragraph in squad_example.paragraphs:
                 for qa in paragraph.qas:
                     # [CLS], c_1, c_2, ..., [HL] a_1, ..., a_|A|m [HL], ..., c_|C|, [SEP], [MASK]
                     # Where C is the context, A the answer (within the context, marked by special
                     # characters [HL] ... [HL]).
-                    question = qa[0]
-                    answers = qa[1]
+                    question = qa.question
+                    answers = qa.answers
                     if len(answers) > 0:  # Makes sure the question in answerable
                         for answer in answers:
                             input_emb = self.generate_bert_hlsqg_input_embedding(paragraph.context, answer)
@@ -112,6 +117,9 @@ class Embedder:
                             if len(input_emb) < max_sequence_length - max_generated_question_length:
                                 x.append(np.array(input_emb, dtype=np.int32))
                                 y.append(np.array(label_emb, dtype=np.int32))
+                                generated += 1
+                                if (limit > -1) and (generated >= limit):
+                                    return x, y
         return x, y
 
     def vocab_size(self):

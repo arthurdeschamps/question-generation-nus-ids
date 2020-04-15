@@ -1,11 +1,13 @@
+import datetime
+
 import tensorflow as tf
-from transformers import BertTokenizer, TFBertModel, BertConfig
+from transformers import BertTokenizer, TFBertModel
 from data_utils.embeddings import Embedder
 from data_utils.parse import read_bert_config
 from models.bert import Bert
 from training.trainer import Trainer
 from training.utils.model_manager import ModelManager
-from training.utils.squad_dataset import SquadDataset
+from data_utils.squad_dataset import SquadDataset
 from defs import PRETRAINED_MODELS_DIR
 
 flags = tf.compat.v1.flags
@@ -19,9 +21,10 @@ flags.DEFINE_string('pretrained_model_name', 'bert_mini_uncased', 'Name of the p
 flags.DEFINE_boolean('load_model', False, 'If the model should be trained or loaded from memory for evaluation')
 flags.DEFINE_string('loaded_model_name', None, 'Name of the model to load.')
 flags.DEFINE_boolean('save_model', True, 'If the model is to be saved or not (after training).')
-flags.DEFINE_string('saved_model_name', None, 'Name of the model to save.')
+flags.DEFINE_string('saved_model_name', datetime.datetime.now().strftime("%Y%m%d-%H%M%S"), 'Name of the model to save.')
 flags.DEFINE_integer('limit_train_data', -1, 'Number of rows to take from the training set.')
 flags.DEFINE_integer('limit_dev_data', -1, 'Number of rows to take from the dev set.')
+flags.DEFINE_boolean('log_test_metrics', True, 'Whether to log metrics for tensorboard at test time.')
 
 EPOCHS = FLAGS.nb_epochs
 debug = FLAGS.debug
@@ -68,8 +71,11 @@ else:
     dev_ds = ds.get_dev_set()
 
 
-trainer = Trainer(model)
-step = tf.Variable(0, dtype=tf.int32, name='step')
+trainer = Trainer(model, model_name=FLAGS.saved_model_name)
+# This is the position of the pointer within sentences
+step = tf.Variable(0, dtype=tf.int32, name='step', trainable=False)
+# This is how many times backprob has been performed
+global_step = tf.Variable(0, dtype=tf.int64, name='global_step', trainable=False)
 
 for epoch in range(EPOCHS):
     # Reset the metrics at the start of the next epoch
@@ -82,14 +88,11 @@ for epoch in range(EPOCHS):
         for features, labels in train_ds:
             prev_time = tf.timestamp()
             step.assign(0)
-            trainer.train_step(features, labels, step)
+            trainer.train_step(features, labels, step, global_step)
             tf.print("Step completed in ", (tf.timestamp() - prev_time), " seconds")
 
     for test_features, test_labels in dev_ds:
-        trainer.test_step(test_features, tf.squeeze(test_labels))
-
-    #  logdir = "logs/scalars/" + datetime.now().strftime("%Y%m%d-%H%M%S")
-    #  tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
+        trainer.test_step(test_features, tf.squeeze(test_labels), global_step, FLAGS.log_test_metrics)
 
     #  template = 'Epoch {}, Loss: {}, Accuracy: {}, Test Loss: {}, Test Accuracy: {}'
     template = 'Epoch {}, Train Loss: {}, Mean Accuracy: {}, Test loss: {}'

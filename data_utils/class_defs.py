@@ -18,7 +18,7 @@ class Question(JsonParsable):
 
     @staticmethod
     def from_json(json) -> Question:
-        return Question(json['question'], json['id'])
+        return Question(json['question'].replace('?', ''), json['id'])
 
 
 class Answer(JsonParsable):
@@ -57,7 +57,7 @@ class Paragraph(JsonParsable):
             answers = []
             for answer in qa['answers']:
                 answers.append(Answer.from_json(answer))
-            qas.append((question, answers))
+            qas.append(QA(question, answers))
         return Paragraph(json['context'], qas)
 
 

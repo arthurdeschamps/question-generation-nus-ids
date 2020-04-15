@@ -202,4 +202,4 @@ squad_2_dataset
 bert_model
 trained
 pre_trained
-list_models.sh
+*.sh

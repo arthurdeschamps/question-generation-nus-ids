@@ -10,3 +10,6 @@ SQUAD_DEV = f"{SQUAD_DIR}/dev-v2.0.json"
 
 TRAINED_MODELS_DIR = f"{ROOT_DIR}/models/trained"
 PRETRAINED_MODELS_DIR = f"{ROOT_DIR}/models/pre_trained"
+
+LOGS_DIR = f"{TRAINED_MODELS_DIR}/logs"
+GRADIENT_DIR = f"{LOGS_DIR}/gradient_tape"

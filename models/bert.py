@@ -96,7 +96,7 @@ class Bert(BaseModel):
             indices=tf.where(tf.not_equal(generated_question, self.embedder.mask_token))
         ), shape=(-1,))
 
-    def step(self, tokens, correct_output_tokens, step=tf.Variable(0, dtype=tf.int32)):
+    def step(self, tokens, correct_output_tokens, step=tf.Variable(0, dtype=tf.int32, name='sequence_pointer')):
         """
         To use for teacher forcing training.
         :param tokens: A token sequence representing a context. Shape should be (batch_size, token_sequences_length).
@@ -105,18 +105,20 @@ class Bert(BaseModel):
         :return: Distributions for the next words, the correct next outputs and new input tokens to use for the next
         iteration.
         """
-
         correct_next_outputs = correct_output_tokens[:, step]
-        hidden_states = self.model(tokens)[0]
-        mask_states = hidden_states[:, -1, :]
-        word_distributions = tf.math.softmax(tf.add(tf.matmul(mask_states, self.W_sqg), self.b_sqg))
+        attention_mask = tf.cast(tf.not_equal(tokens, self.embedder.padding_token), dtype=tf.int32,
+                                 name='attention_mask')
+        hidden_states = self.model(tokens, attention_mask=attention_mask)[0]
+        mask_indices = tf.reshape(tf.reduce_sum(attention_mask, axis=1) - 1, shape=(hidden_states.shape[0], 1))
+        mask_states = tf.gather_nd(hidden_states, mask_indices, batch_dims=1)
+        word_logits = tf.add(tf.matmul(mask_states, self.W_sqg), self.b_sqg, name='word_logits')
         # Uses the correct next token (teacher forcing)
         new_input_tokens = self.embedder.generate_next_input_tokens(
             tokens,
             correct_next_outputs,
             padding_token=self.embedder.padding_token
         )
-        return word_distributions, correct_next_outputs, new_input_tokens
+        return word_logits, correct_next_outputs, new_input_tokens
 
     def _compute_next_beams(self, ite, current_beams, current_beam_probs):
         """
@@ -135,7 +137,7 @@ class Bert(BaseModel):
                 tf.unstack(self.embedder.generate_next_input_tokens(current_beams,
                                                                     top_preds_indices[j],
                                                                     padding_token=self.embedder.padding_token)))
-            new_beams_probs.extend(tf.unstack(tf.multiply(current_beam_probs, top_preds_probs[j])))
+            new_beams_probs.extend(tf.unstack(tf.multiply(current_beam_probs[j], top_preds_probs[j])))
         # Only keeps the k most probably sequences (out of k^2).
         current_beam_probs, top_beams_indices = tf.math.top_k(new_beams_probs, k=self.beam_search_size)
         current_beams = tf.gather(new_beams, top_beams_indices)
