@@ -25,6 +25,7 @@ flags.DEFINE_string('saved_model_name', datetime.datetime.now().strftime("%Y%m%d
 flags.DEFINE_integer('limit_train_data', -1, 'Number of rows to take from the training set.')
 flags.DEFINE_integer('limit_dev_data', -1, 'Number of rows to take from the dev set.')
 flags.DEFINE_boolean('log_test_metrics', True, 'Whether to log metrics for tensorboard at test time.')
+flags.DEFINE_boolean('print_predictions', True, 'Whether to print predictions at training time for each token.')
 
 EPOCHS = FLAGS.nb_epochs
 debug = FLAGS.debug
@@ -71,11 +72,17 @@ else:
     dev_ds = ds.get_dev_set()
 
 
-trainer = Trainer(model, model_name=FLAGS.saved_model_name)
+trainer = Trainer(model,
+                  model_name=FLAGS.saved_model_name,
+                  print_predictions=FLAGS.print_predictions,
+                  optimizer=tf.optimizers.Adam(lr=5e-5)
+                  )
 # This is the position of the pointer within sentences
 step = tf.Variable(0, dtype=tf.int32, name='step', trainable=False)
 # This is how many times backprob has been performed
 global_step = tf.Variable(0, dtype=tf.int64, name='global_step', trainable=False)
+total_loss = tf.Variable(0.0, dtype=tf.float32, name='sequence_loss', trainable=False)
+nb_losses = tf.Variable(0.0, dtype=tf.float32, name='nb_computed_losses', trainable=False)
 
 for epoch in range(EPOCHS):
     # Reset the metrics at the start of the next epoch
@@ -85,11 +92,18 @@ for epoch in range(EPOCHS):
     # test_accuracy.reset_states()
 
     if training:
+        i = 0
         for features, labels in train_ds:
             prev_time = tf.timestamp()
             step.assign(0)
-            trainer.train_step(features, labels, step, global_step)
-            tf.print("Step completed in ", (tf.timestamp() - prev_time), " seconds")
+            total_loss.assign(0.0)
+            nb_losses.assign(0.0)
+            trainer.train_step(total_loss, nb_losses, features, labels, step, global_step)
+            tf.print("Step", i, " completed in ", (tf.timestamp() - prev_time), " seconds")
+            i += 1
+            if (i % 200 == 0) and FLAGS.save_model:
+                tf.print("Saving model...")
+                ModelManager.save_model(model, FLAGS.saved_model_name)
 
     for test_features, test_labels in dev_ds:
         trainer.test_step(test_features, tf.squeeze(test_labels), global_step, FLAGS.log_test_metrics)

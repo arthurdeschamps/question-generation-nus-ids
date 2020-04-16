@@ -106,10 +106,12 @@ class Bert(BaseModel):
         iteration.
         """
         correct_next_outputs = correct_output_tokens[:, step]
-        attention_mask = tf.cast(tf.not_equal(tokens, self.embedder.padding_token), dtype=tf.int32,
-                                 name='attention_mask')
+        attention_mask = tf.cast(tf.logical_and(
+            tf.not_equal(tokens, self.embedder.padding_token),
+            tf.not_equal(tokens, self.embedder.mask_token)
+        ), dtype=tf.int32, name='attention_mask')
         hidden_states = self.model(tokens, attention_mask=attention_mask)[0]
-        mask_indices = tf.reshape(tf.reduce_sum(attention_mask, axis=1) - 1, shape=(hidden_states.shape[0], 1))
+        mask_indices = tf.reshape(tf.reduce_sum(attention_mask, axis=1), shape=(hidden_states.shape[0], 1))
         mask_states = tf.gather_nd(hidden_states, mask_indices, batch_dims=1)
         word_logits = tf.add(tf.matmul(mask_states, self.W_sqg), self.b_sqg, name='word_logits')
         # Uses the correct next token (teacher forcing)
@@ -129,6 +131,11 @@ class Bert(BaseModel):
         word_distributions = tf.math.softmax(tf.add(tf.matmul(mask_states, self.W_sqg), self.b_sqg))
         # Computes the most probable k words for each distribution.
         top_preds_probs, top_preds_indices = tf.math.top_k(word_distributions, k=self.beam_search_size)
+        # tf.print(tf.py_function(
+        #     lambda toks: self.embedder.vocab_lookup(toks[0].numpy()),
+        #     inp=[top_preds_indices],
+        #     Tout=tf.string
+        # ))
         new_beams = []
         new_beams_probs = []
         # Generates the next input sequences for every possible new token and calculates their likelihood.
