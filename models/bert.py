@@ -10,12 +10,10 @@ class Bert(BaseModel):
     """
 
     def __init__(self,
-                 embedder: Embedder,
-                 model,
                  max_generated_question_length=20,
                  beam_search_size=3,
-                 max_sequence_length=512,
-                 hidden_state_size=768):
+                 hidden_state_size=768,
+                 **kwargs):
         """
         :param max_generated_question_length: Limits the length of the generated questions to avoid infinite loops or
         lengthy questions.
@@ -23,13 +21,10 @@ class Bert(BaseModel):
         :param beam_search_size: Number of beams to keep in memory during beach search.
         :param hidden_state_size: Number of hidden states generated at the output layer of the specific BERT model.
         """
-        super(Bert, self).__init__()
+        super(Bert, self).__init__(**kwargs)
         self.max_generated_question_length = tf.constant(max_generated_question_length, dtype=tf.int32)
         self.beam_search_size = beam_search_size
-        self.embedder = embedder
-        self.pretrained_weights_name = embedder.pretrained_weights_name
-        self.model = model
-        self.max_sequence_length = max_sequence_length
+        self.pretrained_weights_name = self.embedder.pretrained_weights_name
 
         initializer = tf.initializers.glorot_uniform()
         hidden_state_size = hidden_state_size
@@ -110,7 +105,7 @@ class Bert(BaseModel):
             tf.not_equal(tokens, self.embedder.padding_token),
             tf.not_equal(tokens, self.embedder.mask_token)
         ), dtype=tf.int32, name='attention_mask')
-        hidden_states = self.model(tokens, attention_mask=attention_mask)[0]
+        hidden_states = self.model(tokens, attention_mask=attention_mask, training=True)[0]
         mask_indices = tf.reshape(tf.reduce_sum(attention_mask, axis=1), shape=(hidden_states.shape[0], 1))
         mask_states = tf.gather_nd(hidden_states, mask_indices, batch_dims=1)
         word_logits = tf.add(tf.matmul(mask_states, self.W_sqg), self.b_sqg, name='word_logits')

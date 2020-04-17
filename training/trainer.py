@@ -78,6 +78,11 @@ class Trainer:
                 nb_generated_tokens = tf.add(nb_generated_tokens, tf.cond(has_non_padding_outputs,
                                                                           lambda: 1.0,
                                                                           lambda: 0.0))
+                # tf.print(tf.py_function(
+                #     lambda toks: self.embedder.vocab_lookup(toks.numpy()),
+                #     inp=[tf.reshape(tf.math.top_k(tf.math.softmax(padding_free_logits), k=4)[1], shape=(-1,))],
+                #     Tout=tf.string
+                # ))
                 return tf.add(i, 1), sequence_loss, nb_generated_tokens, new_input_tokens, question_tokens
 
             initial_size = paragraph_tokens_batches.shape[1]
@@ -86,7 +91,8 @@ class Trainer:
                 # Predicts a token for each token in the target, limiting the paragraph + generated question length to
                 # the max allowed length for this model
                 return tf.logical_and(
-                    tf.less(i, target_question_tokens_batches.shape[1]),
+                    tf.less(i, tf.reduce_sum(tf.cast(tf.not_equal(target_question_tokens_batches,
+                                                                  self.embedder.padding_token), dtype=tf.int32))),
                     tf.less(tf.add(initial_size, i), self.model.max_sequence_length)
                 )
 

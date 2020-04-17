@@ -18,7 +18,7 @@ class Question(JsonParsable):
 
     @staticmethod
     def from_json(json) -> Question:
-        return Question(json['question'].replace('?', ''), json['id'])
+        return Question(json['question'], json['id'])
 
 
 class Answer(JsonParsable):

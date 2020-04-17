@@ -197,8 +197,8 @@ dmypy.json
 # End of https://www.gitignore.io/api/python,pycharm
 
 
-models/nqg
-squad_2_dataset
+models/pre_trained/nqg
+data
 bert_model
 trained
 pre_trained

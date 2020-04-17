@@ -13,6 +13,7 @@ from defs import PRETRAINED_MODELS_DIR
 flags = tf.compat.v1.flags
 
 FLAGS = flags.FLAGS
+flags.DEFINE_float('learning_rate', 5e-5, 'Initial learning rate for Adam.')
 flags.DEFINE_boolean('train', True, 'If training must be performed or only evaluating.')
 flags.DEFINE_integer('nb_epochs', 5, 'Number of epochs.')
 flags.DEFINE_integer('batch_size', 1, 'Batch size.  Must divide evenly into the dataset sizes.')
@@ -50,7 +51,7 @@ else:
 
 tokenizer = BertTokenizer.from_pretrained(vocab_name)
 embedder = Embedder(pretrained_model_name, tokenizer)
-model = Bert(embedder, model=base_model,  hidden_state_size=bert_config.hidden_size)
+model = Bert(embedder=embedder, model=base_model,  hidden_state_size=bert_config.hidden_size, max_sequence_length=512)
 
 if FLAGS.load_model:
     if FLAGS.loaded_model_name is None:
@@ -75,7 +76,7 @@ else:
 trainer = Trainer(model,
                   model_name=FLAGS.saved_model_name,
                   print_predictions=FLAGS.print_predictions,
-                  optimizer=tf.optimizers.Adam(lr=5e-5)
+                  optimizer=tf.optimizers.Adam(lr=FLAGS.learning_rate)
                   )
 # This is the position of the pointer within sentences
 step = tf.Variable(0, dtype=tf.int32, name='step', trainable=False)
