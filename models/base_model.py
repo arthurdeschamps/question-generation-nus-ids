@@ -1,7 +1,7 @@
 from abc import ABC
 from tensorflow.keras import Model
 
-from data_utils.embeddings import Embedder
+from training.utils.embeddings import Embedder
 
 
 class BaseModel(Model, ABC):

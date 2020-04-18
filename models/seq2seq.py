@@ -1,51 +1,59 @@
+import os
+import subprocess
 from typing import List
 
+from data_utils.nqg_dataset import NQGDataset
+from defs import PROCESSED_DATA_DIR, NQG_PREDS_OUTPUT_PATH, PRETRAINED_MODELS_DIR
 from data_utils.class_defs import Answer
 from data_utils.pre_processing import NQGDataPreprocessor
-from models.base_model import BaseModel
-from models.pre_trained.nqg.code.NQG.seq2seq_pt.onlinePreprocess import make_vocabulary_from_data
 import numpy as np
 
 
-class NQG(BaseModel):
+class NQG:
 
-    def __init__(self, passages: List[str], answers: List[Answer], vocab_size=30000,
-                 *args, **kwargs):
+    def __init__(self, nqg_dataset: NQGDataset, *args, **kwargs):
         """
-
-        :param passages: A list of passages, not assumed to be pre-processed.
-        :param answers: List of corresponding answers for the passages.
-        :param vocab_size: Maximum size of the vocabulary to be generated.
+        :param nqg_dataset: A list of (passage, answer), not assumed to be pre-processed.
         """
         super(NQG, self).__init__(*args, **kwargs)
-        self.data_preprocessor = NQGDataPreprocessor(passages)
-        self.answers = answers
-        self._generate_features(vocab_size)
+        self.paths = {}
+        contexts, self.answers = nqg_dataset.get_dataset()
+        self.data_preprocessor = NQGDataPreprocessor(contexts)
+        self._generate_features()
 
     def generate_questions(self):
-        pass
+        subprocess.run([
+            "python3",
+            f"{PRETRAINED_MODELS_DIR}/nqg/code/NQG/seq2seq_pt/translate.py",
+            "-model",
+            f"{PRETRAINED_MODELS_DIR}/nqg/data/redistribute/QG/models/NQG_plus/model_e2.pt",
+            "-src",
+            self.paths["source.txt"],
+            "-bio",
+            self.paths["bio"],
+            "-feats",
+            self.paths["pos"],
+            self.paths["ner"],
+            self.paths["case"],
+            "-output",
+            NQG_PREDS_OUTPUT_PATH
+        ])
 
-    def call(self, inputs, training=None, mask=None):
-        raise NotImplementedError()
-
-    def _generate_features(self, vocab_size: int):
-        voc = make_vocabulary_from_data(self.data_preprocessor.passages, voc_size=vocab_size)
-        answer_starts = np.array(list(answer.answer_start for answer in self.answers))
-        answer_lengths = np.array(list(len(answer.text.split(' ')) for answer in self.answers))
+    def _generate_features(self):
+        answer_starts = np.array(list(answer.start_index for answer in self.answers))
+        answer_lengths = np.array(list(answer.nb_words for answer in self.answers))
         bio = self.data_preprocessor.create_bio_sequences(answer_starts, answer_lengths)
         case = self.data_preprocessor.create_case_sequences()
         ner = self.data_preprocessor.create_ner_sequences()
         pos = self.data_preprocessor.create_pos_sequences()
-        self.passages = self.data_preprocessor.remove_cases()
-        return voc, bio, case, ner, pos
+        self.passages = self.data_preprocessor.uncased_sequences()
+        data_dir = f"{PROCESSED_DATA_DIR}/temp"
+        os.makedirs(data_dir, exist_ok=True)
+        for data_name, data in (("source.txt", self.passages), ("bio", bio), ("case", case), ("ner", ner), ("pos", pos)):
+            fname = f"{data_dir}/data.txt.{data_name}"
+            self.paths[data_name] = fname
+            np.savetxt(fname, data, fmt="%s")
 
 
-passages = [
-    "Hey there my name is Arthur Deschamps and I'm Swiss.",
-    "The man door used to be a doorman for the Doors, standing by the door to open and close doors."
-]
-answers = [
-    Answer("Arthur Deschamps", 5),
-    Answer("for the Doors", 8)
-]
-NQG(passages, answers, embedder=None, model=None, max_sequence_length=None)
+ds = NQGDataset(dataset_type="squad_dev", data_limit=1)
+NQG(ds).generate_questions()

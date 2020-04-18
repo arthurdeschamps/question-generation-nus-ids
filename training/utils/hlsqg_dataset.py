@@ -8,9 +8,9 @@ import tensorflow as tf
 from defs import SQUAD_DEV, SQUAD_TRAIN
 
 
-class SquadDataset:
+class HlsqgDataset:
     """
-    SQuAD dataset manager.
+    HLSQG dataset manager.
     """
 
     def __init__(self,
@@ -21,7 +21,7 @@ class SquadDataset:
                  batch_size,
                  limit_train_data,
                  limit_dev_data):
-        super(SquadDataset, self).__init__()
+        super(HlsqgDataset, self).__init__()
         self.max_sequence_length = max_sequence_length
         self.max_generated_question_length = max_generated_question_length
         self.embedder = embedder

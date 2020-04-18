@@ -3,6 +3,7 @@ from typing import List
 import numpy as np
 import tensorflow as tf
 import stanza
+from stanza import Document
 
 
 def pad_data(data: List[np.ndarray], padding_value) -> List[tf.Tensor]:
@@ -23,15 +24,15 @@ def array_to_string(arr: np.ndarray) -> str:
 
 class NQGDataPreprocessor:
 
-    def __init__(self, passages: np.ndarray):
+    def __init__(self, documents: List[Document]):
         """
-        :param passages: An array of array containing words.
+        :param documents: An array of analyzed documents.
         """
         super(NQGDataPreprocessor, self).__init__()
         stanza.download('en')
         self.nlp = stanza.Pipeline('en', processors='tokenize,pos,ner')
-        self.analyzed = self._nqg_text_preprocessing(passages)
-        self.passages = list(passage.sentences[0].words for passage in self.analyzed)
+        self.analyzed = documents
+        self.passages = list(list(passage.iter_words()) for passage in self.analyzed)
 
     def create_bio_sequences(self, answer_starts: np.ndarray, answer_lengths: np.ndarray) -> np.ndarray:
         """
@@ -43,7 +44,8 @@ class NQGDataPreprocessor:
         for passage, answer_start, answer_length in zip(self.passages, answer_starts, answer_lengths):
             bio = np.full(shape=len(passage), fill_value='O', dtype=np.str)
             bio[answer_start] = 'B'
-            bio[answer_start+1:(answer_start + answer_length)] = 'I'
+            if answer_length > 1:
+                bio[answer_start+1:(answer_start + answer_length)] = 'I'
             bio_seqs.append(array_to_string(bio))
         return bio_seqs
 
@@ -66,7 +68,7 @@ class NQGDataPreprocessor:
             ner_sequence = np.full(shape=passage.num_tokens, fill_value='O', dtype=object)
             for entity in passage.entities:
                 for token in entity.tokens:
-                    ner_sequence[int(token.id) - 1] = entity.type
+                    ner_sequence[int(token.id) - 1] = self._ner_mapping(entity.type)
             ner_sequences.append(array_to_string(ner_sequence))
 
         return np.array(ner_sequences)
@@ -77,14 +79,25 @@ class NQGDataPreprocessor:
             # Creates the POS sequence
             pos_sequence = []
             for word in passage.iter_words():
-                pos_sequence.append(word.pos)
+                pos_sequence.append(word.xpos)
             pos_sequences.append(array_to_string(pos_sequence))
         return np.array(pos_sequences)
 
-    def remove_cases(self):
-        return np.array(np.array(str.lower(word) for word in sequence) for sequence in self.passages)
+    def uncased_sequences(self):
+        return list(array_to_string(list(str.lower(word.text) for word in sequence)) for sequence in self.passages)
 
-    def _nqg_text_preprocessing(self, passages: np.ndarray):
-        assert (self.nlp is not None)
-        return list(self.nlp(passage) for passage in passages)
-
+    def _ner_mapping(self, ne_type):
+        if ne_type in ("PERSON", "MISC", "MONEY", "NUMBER", "ORDINAL", "PERCENT", "DATE",
+                       "TIME", "DURATION", "SET"):
+            return ne_type
+        if ne_type == "ORG":
+            return "ORGANIZATION"
+        if ne_type == "LOC":
+            return "LOCATION"
+        if ne_type in ("NORP", "PRODUCT", "EVENT", "WORK_OF_ART", "LAW", "LANGUAGE"):
+            return "MISC"
+        if ne_type in ("FAC", "GPE"):
+            return "LOCATION"
+        if ne_type in ("QUANTITY", "CARDINAL"):
+            return "NUMBER"
+        raise NotImplementedError(f"Named Entity type {ne_type} not recognized")

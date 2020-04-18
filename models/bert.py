@@ -1,5 +1,4 @@
 import numpy as np
-from data_utils.embeddings import Embedder
 import tensorflow as tf
 from models.base_model import BaseModel
 

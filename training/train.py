@@ -2,12 +2,12 @@ import datetime
 
 import tensorflow as tf
 from transformers import BertTokenizer, TFBertModel
-from data_utils.embeddings import Embedder
+from training.utils.embeddings import Embedder
 from data_utils.parse import read_bert_config
 from models.bert import Bert
 from training.trainer import Trainer
 from training.utils.model_manager import ModelManager
-from data_utils.squad_dataset import SquadDataset
+from training.utils.hlsqg_dataset import HlsqgDataset
 from defs import PRETRAINED_MODELS_DIR
 
 flags = tf.compat.v1.flags
@@ -58,7 +58,7 @@ if FLAGS.load_model:
         raise ValueError("loaded_model_name was None while load_model was requested")
     model = ModelManager.load_model(model, FLAGS.loaded_model_name)
 
-ds = SquadDataset(max_sequence_length=model.max_sequence_length,
+ds = HlsqgDataset(max_sequence_length=model.max_sequence_length,
                   max_generated_question_length=model.max_generated_question_length,
                   embedder=embedder,
                   batch_size=FLAGS.batch_size,
