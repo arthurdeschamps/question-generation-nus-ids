@@ -3,7 +3,7 @@ import shutil
 
 import tensorflow as tf
 from defs import GRADIENT_DIR
-from training.utils.rouge_score import rouge_n
+from testing.rouge_score import rouge_n
 
 
 class Trainer:
@@ -47,8 +47,13 @@ class Trainer:
         with tf.GradientTape() as tape:
 
             def compute_loss(i, sequence_loss, nb_generated_tokens, answer_tokens, question_tokens):
+                token_types = tf.cast(tf.logical_or(
+                    tf.equal(answer_tokens, self.embedder.padding_token),
+                    tf.equal(answer_tokens, self.embedder.mask_token)
+                ), dtype=tf.int32, name="token_types")
                 # Only computes the loss for non-padding tokens (that is, tokens that are actually part of the question)
-                word_logits, correct_outputs, new_input_tokens = self.model.step(answer_tokens, question_tokens, i)
+                word_logits, correct_outputs, new_input_tokens = \
+                    self.model.step(answer_tokens, question_tokens, token_types, i)
                 padding_free_indices = tf.where(tf.not_equal(correct_outputs,
                                                              tf.fill(
                                                                  correct_outputs.shape,
@@ -95,7 +100,6 @@ class Trainer:
                                                                   self.embedder.padding_token), dtype=tf.int32))),
                     tf.less(tf.add(initial_size, i), self.model.max_sequence_length)
                 )
-
             nb_iterations, total_loss, nb_losses, *_ = tf.while_loop(
                 cond,
                 compute_loss,
@@ -105,7 +109,8 @@ class Trainer:
                     total_loss.shape,
                     nb_losses.shape,
                     tf.TensorShape([paragraph_tokens_batches.shape[0], None]),
-                    target_question_tokens_batches.shape]
+                    target_question_tokens_batches.shape
+                ]
             )
 
             global_step.assign(global_step + 1)

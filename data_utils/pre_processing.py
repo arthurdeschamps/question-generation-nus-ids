@@ -29,8 +29,6 @@ class NQGDataPreprocessor:
         :param documents: An array of analyzed documents.
         """
         super(NQGDataPreprocessor, self).__init__()
-        stanza.download('en')
-        self.nlp = stanza.Pipeline('en', processors='tokenize,pos,ner')
         self.analyzed = documents
         self.passages = list(list(passage.iter_words()) for passage in self.analyzed)
 
@@ -66,9 +64,10 @@ class NQGDataPreprocessor:
         for passage in self.analyzed:
             # Takes care of creating the NER sequence
             ner_sequence = np.full(shape=passage.num_tokens, fill_value='O', dtype=object)
-            for entity in passage.entities:
-                for token in entity.tokens:
-                    ner_sequence[int(token.id) - 1] = self._ner_mapping(entity.type)
+            i = 0
+            for word in passage.iter_words():
+                ner_sequence[i] = word.parent.ner
+                i += 1
             ner_sequences.append(array_to_string(ner_sequence))
 
         return np.array(ner_sequences)

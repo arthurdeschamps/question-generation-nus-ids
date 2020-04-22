@@ -2,7 +2,7 @@ import os
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-NQG_DIR = f"{ROOT_DIR}/nqg"
+NQG_DIR = f"{ROOT_DIR}/models/nqg"
 
 DATA_DIR = f"{ROOT_DIR}/data"
 PROCESSED_DATA_DIR = f"{DATA_DIR}/processed"

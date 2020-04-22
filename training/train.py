@@ -73,11 +73,10 @@ else:
     dev_ds = ds.get_dev_set()
 
 
-trainer = Trainer(model,
-                  model_name=FLAGS.saved_model_name,
-                  print_predictions=FLAGS.print_predictions,
-                  optimizer=tf.optimizers.Adam(lr=FLAGS.learning_rate)
-                  )
+trainer = Trainer(
+    model, model_name=FLAGS.saved_model_name, print_predictions=FLAGS.print_predictions,
+    optimizer=tf.optimizers.Adam(lr=FLAGS.learning_rate)
+)
 # This is the position of the pointer within sentences
 step = tf.Variable(0, dtype=tf.int32, name='step', trainable=False)
 # This is how many times backprob has been performed

@@ -90,7 +90,7 @@ class Bert(BaseModel):
             indices=tf.where(tf.not_equal(generated_question, self.embedder.mask_token))
         ), shape=(-1,))
 
-    def step(self, tokens, correct_output_tokens, step=tf.Variable(0, dtype=tf.int32, name='sequence_pointer')):
+    def step(self, tokens, correct_output_tokens, token_types, step=tf.Variable(0, dtype=tf.int32, name='sequence_pointer')):
         """
         To use for teacher forcing training.
         :param tokens: A token sequence representing a context. Shape should be (batch_size, token_sequences_length).
@@ -104,7 +104,12 @@ class Bert(BaseModel):
             tf.not_equal(tokens, self.embedder.padding_token),
             tf.not_equal(tokens, self.embedder.mask_token)
         ), dtype=tf.int32, name='attention_mask')
-        hidden_states = self.model(tokens, attention_mask=attention_mask, training=True)[0]
+        hidden_states = self.model(
+            tokens,
+            attention_mask=attention_mask,
+            token_type_ids=token_types,
+            training=True
+        )[0]
         mask_indices = tf.reshape(tf.reduce_sum(attention_mask, axis=1), shape=(hidden_states.shape[0], 1))
         mask_states = tf.gather_nd(hidden_states, mask_indices, batch_dims=1)
         word_logits = tf.add(tf.matmul(mask_states, self.W_sqg), self.b_sqg, name='word_logits')

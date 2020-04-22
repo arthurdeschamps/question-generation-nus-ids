@@ -19,7 +19,7 @@ def read_squad_dataset(dataset_path: str, limit=-1):
     """
     ds = pd.read_json(dataset_path)
     ds = ds["data"][:limit]
-    ds = list(parse_squad_example(example) for example in ds)
+    ds = list(parsed for parsed in (parse_squad_example(example) for example in ds) if parsed is not None)
     return ds
 
 

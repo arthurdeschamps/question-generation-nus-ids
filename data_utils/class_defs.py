@@ -11,14 +11,15 @@ class JsonParsable(ABC):
 
 class Question(JsonParsable):
 
-    def __init__(self, question: str, question_id: str):
+    def __init__(self, question: str, question_id: str, is_answerable: bool):
         super(Question, self).__init__()
         self.question = question
         self.question_id = question_id
+        self.is_answerable = is_answerable
 
     @staticmethod
     def from_json(json) -> Question:
-        return Question(json['question'], json['id'])
+        return Question(json['question'], json['id'], not(bool(json['is_impossible'])))
 
 
 class Answer(JsonParsable):
@@ -54,10 +55,13 @@ class Paragraph(JsonParsable):
         qas = []
         for qa in json['qas']:
             question = Question.from_json(qa)
-            answers = []
-            for answer in qa['answers']:
-                answers.append(Answer.from_json(answer))
-            qas.append(QA(question, answers))
+            if question.is_answerable:
+                answers = []
+                for answer in qa['answers']:
+                    answers.append(Answer.from_json(answer))
+                qas.append(QA(question, answers))
+        if len(qas) == 0:
+            return None
         return Paragraph(json['context'], qas)
 
 
@@ -71,5 +75,8 @@ class SquadExample:
     @staticmethod
     def from_json(json):
         title = json['title']
-        paragraphs = list(Paragraph.from_json(para_json) for para_json in json['paragraphs'])
+        paragraphs = list(parsed for parsed in
+                          (Paragraph.from_json(para_json) for para_json in json['paragraphs']) if parsed is not None)
+        if len(paragraphs) == 0:
+            return None
         return SquadExample(title, paragraphs)

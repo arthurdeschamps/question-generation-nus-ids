@@ -44,7 +44,8 @@ class Embedder:
         old_input_tokens = tf.unstack(prev_tokens)
         new_input_tokens = []
         # Creates the new sequences
-        for old_input, input_end, predicted_token in zip(old_input_tokens, sizes, unstacked_predicted_tokens):
+        for old_input, input_end, predicted_token,\
+                in zip(old_input_tokens, sizes, unstacked_predicted_tokens):
             new_input_tokens.append(
                 tf.concat(
                     (old_input[:input_end - 1],  # this is the tokens we had so far (without mask)
@@ -54,6 +55,7 @@ class Embedder:
                     axis=0
                 )
             )
+
         return tf.stack(new_input_tokens, axis=0)
 
     def generate_bert_hlsqg_input_embedding(self, context, answer: Answer):

@@ -1,3 +1,4 @@
+import re
 from typing import List, Tuple
 
 import stanza
@@ -43,33 +44,37 @@ class NQGDataset:
         else:
             raise NotImplementedError()
 
-    def get_dataset(self) -> Tuple[List[Document], List[Answer]]:
+    def get_dataset(self) -> Tuple[List[Document], List[Answer], List[str]]:
         contexts = []
         answers = []
+        questions = []
         for datapoint in self.ds:
             for paragraph in datapoint.paragraphs:
                 analyzed = self.nlp(paragraph.context)
                 for qa in paragraph.qas:
-                    for answer in qa.answers:
-                        answer_start_index = None
-                        answer_end_index = None
-                        answer_end_char_ind = answer.answer_start + len(answer.text)
-                        i = 0
-                        for word in analyzed.iter_words():
-                            if f"start_char={str(answer.answer_start)}" in word.misc:
-                                answer_start_index = i
-                            if answer_start_index is not None:
-                                end_position = int(word.misc[word.misc.index("end_char=")+9:])
-                                if answer_end_char_ind <= end_position:
-                                    answer_end_index = i
-                                    break
-                            i += 1
-                        if (answer_start_index is None) or (answer_end_index is None):
-                            raise AssertionError(f"Issue while parsing answer {answer}")
-                        contexts.append(analyzed)
-                        answers.append(NQGDataset.Answer(
-                            answer_start_index,
-                            answer_end_index - answer_start_index + 1,
-                            text=answer.text
-                        ))
-        return contexts, answers
+                    if qa.question.is_answerable:
+                        for answer in qa.answers:
+                            answer_start_index = None
+                            answer_end_index = None
+                            answer_end_char_ind = answer.answer_start + len(answer.text)
+                            i = 0
+                            for word in analyzed.iter_words():
+                                current_position = int(re.search('start_char=([0-9]+)', word.misc).group(1))
+                                if (answer_start_index is None) and (current_position >= answer.answer_start):
+                                    answer_start_index = i
+                                if answer_start_index is not None:
+                                    end_position = int(re.search(r'end_char=([0-9]+)', word.misc).group(1))
+                                    if answer_end_char_ind <= end_position:
+                                        answer_end_index = i
+                                        break
+                                i += 1
+                            if (answer_start_index is None) or (answer_end_index is None):
+                                raise AssertionError(f"Issue while parsing answer {answer}")
+                            contexts.append(analyzed)
+                            answers.append(NQGDataset.Answer(
+                                answer_start_index,
+                                answer_end_index - answer_start_index + 1,
+                                text=answer.text
+                            ))
+                            questions.append(qa.question.question)
+        return contexts, answers, questions
