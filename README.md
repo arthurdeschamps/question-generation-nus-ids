@@ -36,7 +36,22 @@ your trained model.
 `--model_path path` : path to a .pt trained model file.
 
 ## Literature Review
-### Answer-focused and Position-aware Neural Question Generation
+### BLEU Scores
+Here are reported the BLEU-4 scores on the SQuAD dataset for each architecture presented down below.
+
+| Model Number        | BLEU score           | Code Available  |
+| :-------------: |:-------------:| :-----:|
+| 1 | 15.64 | N |
+| 2  | 14.39 (?)  | N |
+| 3 | 16.31  | N |
+| 4 | 15.29 | N |
+| 5 | 16.99 | Y |
+| 6 |16.27 | N |
+| 7 | 18.53 | N |
+| 8 | ? | Y |
+
+
+### 1. Answer-focused and Position-aware Neural Question Generation
 **Link**: https://www.aclweb.org/anthology/D18-1427.pdf
 
 **Goal**: Solving 2 common issues: mismatched question types and unrelated copied words (words taken from the passage that are irrelevant or misleading in answering the question).
@@ -54,7 +69,7 @@ Marco: BLEU-1: 48.24, BLEU-2: 35.95, BLEU-3: 25.79, BLEU-4: 19.45
 **Code/Dataset available**: no/yes
 
 
-### Neural Generation of Diverse Questions using Answer Focus, Contextual and Linguistic Features
+### 2. Neural Generation of Diverse Questions using Answer Focus, Contextual and Linguistic Features
 **Link**: https://www.aclweb.org/anthology/W18-6536.pdf
 
 **Goal**: Integrating different features instead of only the plain text/passage and attempt to use question-oriented sentence embeddings as extra inputs.
@@ -72,7 +87,7 @@ These scores are to take with a grain of salt as the methodology is different fr
 
 **Code/Dataset available**: no/yes
 
-### Question-type Driven Question Generation
+### 3. Question-type Driven Question Generation
 **Link**: https://www.aclweb.org/anthology/D19-1622.pdf
 
 **Goal**: Generate the interrogative word first and feed it to the predictive model to improve the correctness of the questions.
@@ -82,13 +97,15 @@ These scores are to take with a grain of salt as the methodology is different fr
 **Best model**: The feature-rich encoder is a bi-LSTM, the interrogative word generator a simple LSTM and the decoder a simple LSTM with attention on its inputs. The first word fed to the decoder is the predicted interrogative word. They also use a copy mechanism and feed-forward neural network to produce word distributions. The loss function is a combination of both encoder’s loss (joint learning task).
 
 **Scores**: 
-SQuAD -> BLEU-1: 43.11 BLEU-2: 29.13 BLEU-3: 21.39 BLEU-4: 16.31 MARCO -> BLEU-1: 55.67 BLEU-2: 38.16 BLEU-3: 28.12 BLEU-4: 21.59
+SQuAD -> BLEU-1: 43.11 BLEU-2: 29.13 BLEU-3: 21.39 BLEU-4: 16.31 
+
+MARCO -> BLEU-1: 55.67 BLEU-2: 38.16 BLEU-3: 28.12 BLEU-4: 21.59
 
 **Datasets**: SQuAD (they directly use the data given by the NQG team)  and MARCO
 
 **Code/Dataset available**: no/yes
 
-### Generating Highly Relevant Questions
+### 4. Generating Highly Relevant Questions
 **Link**: https://www.aclweb.org/anthology/D19-1614.pdf
 
 **Goal**: Improving the relevance and quality or questions.
@@ -103,7 +120,7 @@ SQuAD -> BLEU-1: 43.11 BLEU-2: 29.13 BLEU-3: 21.39 BLEU-4: 16.31 MARCO -> BLEU-1
 
 **Code/Dataset available**: no/yes
 
-### Let’s Ask Again: Refine Network for Automatic Question Generation
+### 5. Let’s Ask Again: Refine Network for Automatic Question Generation
 **Link**: https://www.aclweb.org/anthology/D19-1326.pdf
 
 **Goal**: Generating more grammatically correct, coherent and to the point questions.
@@ -119,7 +136,7 @@ On SQuAD: BLEU-1: 46.41 BLEU-2: 30.66 BLEU-3: 22.42 BLEU-4: 16.99 ROUGE-L: 45.03
 
 **Code/Dataset available**: Yes/yes
 
-### Improving Question Generation With to the Point Context
+### 6. Improving Question Generation With to the Point Context
 **Link**: https://www.aclweb.org/anthology/D19-1317.pdf
 
 **Goal**: Overcoming the issue of useful context words located far away from the answer span.
@@ -134,7 +151,7 @@ On SQuAD: BLEU-1: 46.41 BLEU-2: 30.66 BLEU-3: 22.42 BLEU-4: 16.99 ROUGE-L: 45.03
 
 **Code/Dataset available**: No/Yes
 
-### Let Me Know What to Ask: Interrogative-Word-Aware Question Generation
+### 7. Let Me Know What to Ask: Interrogative-Word-Aware Question Generation
 **Link**: https://www.aclweb.org/anthology/D19-5822.pdf
 
 **Goal**: See the benefits of generating the interrogative word and question in separate steps, the former with a classifier and the latter with a decoder.
@@ -156,7 +173,7 @@ During training, the gold interrogative word is fed to the encoder-decoder model
 
 **Code/Dataset available**: no/yes
 
-### Neural Question Generation using Interrogative Phrases
+### 8. Neural Question Generation using Interrogative Phrases
 **Link**: https://www.aclweb.org/anthology/W19-8613.pdf
 
 **Goal**: See the benefits of generating a question with a specific interrogative word. For instance, if the answer is “yesterday”, we might want to generate a question that starts with “when”. This, according to the authors, improves the quality of the generated questions and allows to have more control over the generated questions.
@@ -171,7 +188,7 @@ During training, the gold interrogative word is fed to the encoder-decoder model
 
 **Code/Dataset available**: yes/yes
 
-### BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding
+### 9. BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding
 **Link**: https://arxiv.org/pdf/1810.04805.pdf
 
 **Goal**: Generic language model (can be used for a wide range of NLP tasks as a pre-trained model that’s easily extensible).
@@ -216,7 +233,7 @@ Observations
 
 **Code/Dataset available**: yes/yes
 
-### Neural Question Generation from Text: A Preliminary Study
+### 10. Neural Question Generation from Text: A Preliminary Study
 **Link**: https://arxiv.org/pdf/1704.01792.pdf
 **Goal**:
 Neural Question Generation servers 2 main purposes: educational and increasing available data for the reverse task (question answering). Up until this paper, no neural approaches to generating questions from unstructured text data had been explored.
@@ -238,6 +255,7 @@ The BiGRU model produces one forward and one backward sequence from the input ve
 
 ## Miscellaneous
 ### Question types / Possible answers
+\[F\] marks factoid type of questions.
 - Where: 
     - Geographical location (country, city, etc) \[F\]
     - Establishment (bank, post office, town hall) \[F\]
