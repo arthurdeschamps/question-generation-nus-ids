@@ -204,28 +204,28 @@ The BiGRU model produces one forward and one backward sequence from the input ve
 ## Miscellaneous
 ### Question types / Possible answers
 - Where: 
-    - Geographical location (country, city, etc)
-    - Establishment (bank, post office, townhall)
-    - Type of environment (warm countries, dark rooms, large stadiums)
-    - Specific but non-geographical places (bathroom, kitchen, basketball court)
+    - Geographical location (country, city, etc) \[F\]
+    - Establishment (bank, post office, town hall) \[F\]
+    - Type of environment (warm countries, dark rooms, large stadiums) \[F\]
+    - Specific but non-geographical places (bathroom, kitchen, basketball court) \[F\]
     
 - When:
-  - Datetime (specific date + time, December 25th at midnight)
-  - Recurring time (every Friday, at night)
-  - Range/period of time (during the Renaissance, during world war 2)
+  - Datetime (specific date + time, December 25th at midnight) \[F\]
+  - Recurring time (every Friday, at night) \[F\]
+  - Range/period of time (during the Renaissance, during world war 2) \[F\]
   - Future entailment (when my son will be able to walk, when I’ll have a job)
 - Why:
-  - Reason (Why are you late? because I got lost / because the car stopped)
-  - Explanation (why do birds have wings? to be able to fly, why do toddlers cry constantly? because they…)
+  - Reason (Why are you late? because I got lost / because the car stopped) \[F\]
+  - Explanation (why do birds have wings? to be able to fly, why do toddlers cry constantly? because they…) \[F\]
 - Who:
-  - Specific person (Who did this / Who is he? Arthur; Who was the 3rd president of the United States?)
-  - Type of person/people (who has big calves? cyclists, who can bear the weight of isolation? mentally tough people)
+  - Specific person (Who did this / Who is he? Arthur; Who was the 3rd president of the United States?) \[F\]
+  - Type of person/people (who has big calves? cyclists, who can bear the weight of isolation? mentally tough people) \[F\]
 - What:
-  - Multi-choice question (what is your favorite color? what evaluation metric should we use?)
-  - Context specific information retrieval (what kind of food do you prefer? What activity would you like to do today? What kind of person is Elizabeth?)
+  - Multi-choice question (what is your favorite color? what evaluation metric should we use?) \[F\]
+  - Context specific information retrieval (what kind of food do you prefer? What activity would you like to do today? What kind of person is Elizabeth?) \[F\]
   - Open-ended information retrieval (What can I do for you? What did she tell you?)
 - How: 
   - Instructional question (How do you bake cookies? How does one replace an exhaust pipe?)
   - Recollection of past events (How did you get here? How did you manage to get an A+?)
-  - Rank order scaling (How are you? How spicy is your food? How old are you? How good are you at Boxing?)
+  - Rank order scaling (How are you? How spicy is your food? How old are you? How good are you at Boxing?) \[F\]
 
