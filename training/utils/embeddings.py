@@ -104,24 +104,20 @@ class Embedder:
         y = []
         generated = 0
         for squad_example in squad_examples:
-            for paragraph in squad_example.paragraphs:
-                for qa in paragraph.qas:
-                    # [CLS], c_1, c_2, ..., [HL] a_1, ..., a_|A|m [HL], ..., c_|C|, [SEP], [MASK]
-                    # Where C is the context, A the answer (within the context, marked by special
-                    # characters [HL] ... [HL]).
-                    question = qa.question
-                    answers = qa.answers
-                    if len(answers) > 0:  # Makes sure the question in answerable
-                        for answer in answers:
-                            input_emb = self.generate_bert_hlsqg_input_embedding(paragraph.context, answer)
-                            label_emb = self.generate_bert_hlsqg_output_embedding(question)
-                            # Maximum sequence length of this model
-                            if len(input_emb) < max_sequence_length - max_generated_question_length:
-                                x.append(np.array(input_emb, dtype=np.int32))
-                                y.append(np.array(label_emb, dtype=np.int32))
-                                generated += 1
-                                if (limit > -1) and (generated >= limit):
-                                    return x, y
+            # [CLS], c_1, c_2, ..., [HL] a_1, ..., a_|A|m [HL], ..., c_|C|, [SEP], [MASK]
+            # Where C is the context, A the answer (within the context, marked by special
+            # characters [HL] ... [HL]).
+            question = squad_example.question
+            answer = squad_example.answer
+            input_emb = self.generate_bert_hlsqg_input_embedding(squad_example.context, answer)
+            label_emb = self.generate_bert_hlsqg_output_embedding(question)
+            # Maximum sequence length of this model
+            if len(input_emb) < max_sequence_length - max_generated_question_length:
+                x.append(np.array(input_emb, dtype=np.int32))
+                y.append(np.array(label_emb, dtype=np.int32))
+                generated += 1
+                if (limit > -1) and (generated >= limit):
+                    return x, y
         return x, y
 
     def vocab_size(self):

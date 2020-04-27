@@ -66,7 +66,8 @@ class NQGDataPreprocessor:
             ner_sequence = np.full(shape=passage.num_tokens, fill_value='O', dtype=object)
             i = 0
             for word in passage.iter_words():
-                ner_sequence[i] = word.parent.ner
+                token_ner = word.parent.ner
+                ner_sequence[i] = token_ner if len(token_ner) == 1 else self._ner_mapping(token_ner[2:])
                 i += 1
             ner_sequences.append(array_to_string(ner_sequence))
 

@@ -6,10 +6,6 @@ from defs import PRETRAINED_MODELS_DIR
 from data_utils.class_defs import SquadExample
 
 
-def parse_squad_example(raw_example):
-    return SquadExample.from_json(raw_example)
-
-
 def read_squad_dataset(dataset_path: str, limit=-1):
     """
     Loads a squad dataset (json format) from the given path.
@@ -19,8 +15,10 @@ def read_squad_dataset(dataset_path: str, limit=-1):
     """
     ds = pd.read_json(dataset_path)
     ds = ds["data"][:limit]
-    ds = list(parsed for parsed in (parse_squad_example(example) for example in ds) if parsed is not None)
-    return ds
+    squad_examples = []
+    for examples in ds:
+        squad_examples.extend(SquadExample.from_json(examples))
+    return squad_examples
 
 
 def read_bert_config(model_dir) -> BertConfig:

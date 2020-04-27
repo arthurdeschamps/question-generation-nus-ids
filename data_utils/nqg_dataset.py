@@ -1,4 +1,4 @@
-import re
+import logging
 from typing import List, Tuple
 
 import stanza
@@ -48,33 +48,29 @@ class NQGDataset:
         contexts = []
         answers = []
         questions = []
-        for datapoint in self.ds:
-            for paragraph in datapoint.paragraphs:
-                analyzed = self.nlp(paragraph.context)
-                for qa in paragraph.qas:
-                    if qa.question.is_answerable:
-                        for answer in qa.answers:
-                            answer_start_index = None
-                            answer_end_index = None
-                            answer_end_char_ind = answer.answer_start + len(answer.text)
-                            i = 0
-                            for word in analyzed.iter_words():
-                                current_position = int(re.search('start_char=([0-9]+)', word.misc).group(1))
-                                if (answer_start_index is None) and (current_position >= answer.answer_start):
-                                    answer_start_index = i
-                                if answer_start_index is not None:
-                                    end_position = int(re.search(r'end_char=([0-9]+)', word.misc).group(1))
-                                    if answer_end_char_ind <= end_position:
-                                        answer_end_index = i
-                                        break
-                                i += 1
-                            if (answer_start_index is None) or (answer_end_index is None):
-                                raise AssertionError(f"Issue while parsing answer {answer}")
-                            contexts.append(analyzed)
-                            answers.append(NQGDataset.Answer(
-                                answer_start_index,
-                                answer_end_index - answer_start_index + 1,
-                                text=answer.text
-                            ))
-                            questions.append(qa.question.question)
+        issues = 0
+        for example in self.ds:
+            analyzed = self.nlp(example.context)
+            answer = example.answer
+            start_index = None
+            end_index = None
+            i = 0
+            for word in analyzed.iter_words():
+                if start_index is None and word.text == answer.text[:len(word.text)]:
+                    start_index = i
+                if start_index is not None and word.text == answer.text[-len(word.text):]:
+                    end_index = i
+                i += 1
+            if (start_index is None) or (end_index is None):
+                issues += 1
+                logging.warning(f"Issue while parsing answer '{answer.text}'")
+                continue
+            contexts.append(analyzed)
+            answers.append(NQGDataset.Answer(
+                start_index,
+                end_index - start_index + 1,
+                text=answer.text
+            ))
+            questions.append(example.question.question.lower())
+        logging.info(f"Issues: {issues}")
         return contexts, answers, questions

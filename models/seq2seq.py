@@ -24,7 +24,8 @@ class NQG:
             f"{ROOT_DIR}/training/run_squad_qg.sh",
             f"{NQG.data_home}",
             f"{NQG_DIR}/code/NQG/seq2seq_pt",
-            f"{TRAINED_MODELS_DIR}/nqg"
+            f"{TRAINED_MODELS_DIR}/nqg",
+            ROOT_DIR
         ])
 
     def generate_questions(self):
@@ -49,7 +50,7 @@ class NQG:
         ])
 
     @staticmethod
-    def generate_vocabulary_files(vocab_size='45000'):
+    def generate_vocabulary_files(vocab_size):
         collect_vocab = f"{NQG_DIR}/code/NQG/seq2seq_pt/CollectVocab.py"
         python = "python3"
         subprocess.run([
@@ -116,14 +117,15 @@ if __name__ == '__main__':
                         help='Path to the model', required=False,
                         default=f"{PRETRAINED_MODELS_DIR}/nqg/data/redistribute/QG/models/NQG_plus/base_20_epochs/" +
                                 f"model_dev_metric_0.133_e7.pt")
+    parser.add_argument('--vocab_size', help='Size of the vocabulary to use for training', default=20000)
 
     args = parser.parse_args()
 
     if args.action == 'generate_data':
         NQG.generate_features('dev')
         NQG.generate_features('train')
-        NQG.generate_vocabulary_files()
     elif args.action == 'train':
+        NQG.generate_vocabulary_files(vocab_size=str(args.vocab_size))
         NQG.train()
     elif args.action == 'predict_original':
         subprocess.run([

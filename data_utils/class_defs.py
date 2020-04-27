@@ -1,6 +1,11 @@
 from __future__ import annotations
 from abc import ABC
-from typing import Tuple, List
+from typing import List, Dict
+import nltk
+
+
+nltk.download('punkt')
+tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
 
 
 class JsonParsable(ABC):
@@ -11,15 +16,21 @@ class JsonParsable(ABC):
 
 class Question(JsonParsable):
 
-    def __init__(self, question: str, question_id: str, is_answerable: bool):
+    def __init__(self, question: str, question_id: str):
         super(Question, self).__init__()
         self.question = question
         self.question_id = question_id
-        self.is_answerable = is_answerable
 
     @staticmethod
     def from_json(json) -> Question:
-        return Question(json['question'], json['id'], not(bool(json['is_impossible'])))
+        q = Question(json['question'], json['id'])
+        try:
+            question_mark_ind = str.index(q.question, "?")
+        except ValueError:
+            question_mark_ind = len(q.question) - 1
+        if q.question[question_mark_ind - 1] != ' ':
+            q.question = q.question[:question_mark_ind] + ' ' + '?'
+        return q
 
 
 class Answer(JsonParsable):
@@ -34,49 +45,48 @@ class Answer(JsonParsable):
         return Answer(json['text'], json['answer_start'])
 
 
-class QA:
+class SquadExample(JsonParsable):
 
-    def __init__(self, question: Question, answers: List[Answer]):
-        super(QA, self).__init__()
-        self.question = question
-        self.answers = answers
-
-
-class Paragraph(JsonParsable):
-
-    def __init__(self, context: str, qas: List[QA]):
-        super(Paragraph, self).__init__()
-        self.qas = qas
-        self.id = id
-        self.context = context
-
-    @staticmethod
-    def from_json(json):
-        qas = []
-        for qa in json['qas']:
-            question = Question.from_json(qa)
-            if question.is_answerable:
-                answers = []
-                for answer in qa['answers']:
-                    answers.append(Answer.from_json(answer))
-                qas.append(QA(question, answers))
-        if len(qas) == 0:
-            return None
-        return Paragraph(json['context'], qas)
-
-
-class SquadExample:
-
-    def __init__(self, title: str, paragraphs):
+    def __init__(self, context: str, question: Question, answer: Answer):
         super(SquadExample, self).__init__()
-        self.title = title
-        self.paragraphs = paragraphs
+        self.context = context
+        self.question = question
+        self.answer = answer
 
     @staticmethod
-    def from_json(json):
-        title = json['title']
-        paragraphs = list(parsed for parsed in
-                          (Paragraph.from_json(para_json) for para_json in json['paragraphs']) if parsed is not None)
-        if len(paragraphs) == 0:
-            return None
-        return SquadExample(title, paragraphs)
+    def from_json(json) -> List[SquadExample]:
+        squad_examples = []
+        for paragraph in json['paragraphs']:
+            sentences_bounds = SquadExample.get_sentences_bounds(paragraph['context'])
+            for qa in paragraph['qas']:
+                start_indices = set()
+                texts = set()
+                answers = qa['answers']
+                for answer_json in answers:
+                    answer = Answer.from_json(answer_json)
+                    if answer.answer_start not in start_indices or answer.text not in texts:
+                        start_indices.add(answer.answer_start)
+                        texts.add(answer.text)
+                        question = Question.from_json(qa)
+                        context = SquadExample.get_answer_context(answer, paragraph['context'], sentences_bounds)
+                        squad_examples.append(SquadExample(context, question, answer))
+        return squad_examples
+
+    @staticmethod
+    def get_answer_context(answer: Answer, context: str, sentences_bounds: Dict[int, str]):
+        sentence_start = 0
+        for bound in sentences_bounds.keys():
+            if answer.answer_start < bound:
+                return sentences_bounds[bound]
+            sentence_start = bound
+        return sentences_bounds[sentence_start]
+
+    @staticmethod
+    def get_sentences_bounds(context: str) -> Dict[int, str]:
+        sentences = tokenizer.tokenize(context)
+        ind = 0
+        bounds = {}
+        for sentence in sentences:
+            ind += len(sentence)
+            bounds[ind] = sentence
+        return bounds

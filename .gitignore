@@ -201,4 +201,4 @@ data
 bert_model
 trained
 models/pre_trained
-*.sh
+/*.sh
