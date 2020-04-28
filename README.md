@@ -49,6 +49,7 @@ Here are reported the BLEU-4 scores on the SQuAD dataset for each architecture p
 | 6 |16.27 | N |
 | 7 | 18.53 | N |
 | 8 | ? | Y |
+| 9 | 13.29 | Y |
 
 
 ### 1. Answer-focused and Position-aware Neural Question Generation
