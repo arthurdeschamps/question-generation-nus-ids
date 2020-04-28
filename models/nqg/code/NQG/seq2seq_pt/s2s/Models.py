@@ -25,7 +25,7 @@ class Encoder(nn.Module):
                                      opt.word_vec_size,
                                      padding_idx=s2s.Constants.PAD)
         self.bio_lut = nn.Embedding(8, 16, padding_idx=s2s.Constants.PAD)  # TODO: Fix this magic number
-        self.feat_lut = nn.Embedding(64, 16, padding_idx=s2s.Constants.PAD)  # TODO: Fix this magic number
+        self.feat_lut = nn.Embedding(66, 16, padding_idx=s2s.Constants.PAD)  # TODO: Fix this magic number
         input_size = input_size + 16 + 16 * 3
         self.rnn = nn.GRU(input_size, self.hidden_size,
                           num_layers=opt.layers,
