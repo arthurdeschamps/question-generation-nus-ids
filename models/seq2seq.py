@@ -89,21 +89,30 @@ class NQG:
             raise ValueError(f"mode should be one of 'train' or 'dev")
 
         ds = NQGDataset(dataset_type=f"squad_{mode}")
-        contexts, answers, questions = ds.get_dataset()
-        data_preprocessor = NQGDataPreprocessor(contexts)
-        answer_starts = np.array(list(answer.start_index for answer in answers))
-        answer_lengths = np.array(list(answer.nb_words for answer in answers))
-        ner = data_preprocessor.create_ner_sequences()
-        bio = data_preprocessor.create_bio_sequences(answer_starts, answer_lengths)
-        case = data_preprocessor.create_case_sequences()
-        pos = data_preprocessor.create_pos_sequences()
-        passages = data_preprocessor.uncased_sequences()
-        data_dir = f"{NQG.data_home}/{mode}"
-        os.makedirs(data_dir, exist_ok=True)
-        for data_name, data in (("source.txt", passages), ("target.txt", questions), ("bio", bio),
-                                ("case", case), ("ner", ner), ("pos", pos)):
-            fname = f"{data_dir}/data.txt.{data_name}"
-            np.savetxt(fname, data, fmt="%s")
+        if mode == 'dev':
+            # Need to split into dev/test
+            segments = ['dev', 'test']
+            c_dev, a_dev, q_dev, c_test, a_test, q_test = ds.get_split(0.6)
+            data = [(c_dev, a_dev, q_dev), (c_test, a_test, q_test)]
+        else:
+            segments = ['train']
+            data = [ds.get_dataset()]
+
+        for segment_type, segment_data in zip(segments, data):
+            data_preprocessor = NQGDataPreprocessor(segment_data[0])
+            answer_starts = np.array(list(answer.start_index for answer in segment_data[1]))
+            answer_lengths = np.array(list(answer.nb_words for answer in segment_data[1]))
+            ner = data_preprocessor.create_ner_sequences()
+            bio = data_preprocessor.create_bio_sequences(answer_starts, answer_lengths)
+            case = data_preprocessor.create_case_sequences()
+            pos = data_preprocessor.create_pos_sequences()
+            passages = data_preprocessor.uncased_sequences()
+            data_dir = f"{NQG.data_home}/{segment_type}"
+            os.makedirs(data_dir, exist_ok=True)
+            for data_name, content in (("source.txt", passages), ("target.txt", segment_data[2]), ("bio", bio),
+                                    ("case", case), ("ner", ner), ("pos", pos)):
+                fname = f"{data_dir}/data.txt.{data_name}"
+                np.savetxt(fname, content, fmt="%s")
 
 
 if __name__ == '__main__':

@@ -67,7 +67,7 @@ class NQGDataPreprocessor:
             i = 0
             for word in passage.iter_words():
                 token_ner = word.parent.ner
-                ner_sequence[i] = token_ner if len(token_ner) == 1 else self._ner_mapping(token_ner[2:])
+                ner_sequence[i] = self._ner_mapping(token_ner if len(token_ner) == 1 else token_ner[2:])
                 i += 1
             ner_sequences.append(array_to_string(ner_sequence))
 
@@ -88,7 +88,7 @@ class NQGDataPreprocessor:
 
     def _ner_mapping(self, ne_type):
         if ne_type in ("PERSON", "MISC", "MONEY", "NUMBER", "ORDINAL", "PERCENT", "DATE",
-                       "TIME", "DURATION", "SET"):
+                       "TIME", "DURATION", "SET", "O"):
             return ne_type
         if ne_type == "ORG":
             return "ORGANIZATION"

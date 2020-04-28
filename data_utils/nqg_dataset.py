@@ -1,4 +1,5 @@
 import logging
+import random
 from typing import List, Tuple
 
 import stanza
@@ -17,7 +18,6 @@ class DocumentWithWords:
 
 
 class NQGDataset:
-
     class Answer:
 
         def __init__(self, start_index, nb_words, text):
@@ -74,3 +74,13 @@ class NQGDataset:
             questions.append(example.question.question.lower())
         logging.info(f"Issues: {issues}")
         return contexts, answers, questions
+
+    def get_split(self, first_part_size_ratio: float):
+        c, a, q = self.get_dataset()
+        ds = list(zip(c, a, q))
+        random.shuffle(ds)
+        c, a, q = zip(*ds)
+        ds_size = len(c)
+        first_part_size = int(first_part_size_ratio * ds_size)
+        return c[:first_part_size], a[:first_part_size], q[:first_part_size], c[first_part_size:], a[first_part_size:],\
+               q[first_part_size:]
