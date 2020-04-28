@@ -1,0 +1,20 @@
+#folders
+/data/*
+!.gitkeep
+/nlg-eval/*
+/docs/*
+/available_models/*
+#extention
+*.txt
+*.ipynb
+*.log
+*.yml
+#other python script
+gq_interro_process.py
+experiment.py
+eval_human_eval.py
+bleu_prepro.py
+qg_randomize.py
+qg_prepro_randomsentence.py
+run_coqa.py
+!requirements.txt

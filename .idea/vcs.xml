@@ -3,5 +3,6 @@
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/models/nqg/code/NQG" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/models/nqg_ip/NQG_Interrogative_Phrases" vcs="Git" />
   </component>
 </project>
