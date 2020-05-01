@@ -1,8 +1,8 @@
 from typing import List
 
-from data_utils.class_defs import SquadExample
-from data_utils.parse import read_squad_dataset
-from data_utils.pre_processing import pad_data
+from data_processing.class_defs import SquadExample
+from data_processing.parse import read_squad_dataset
+from data_processing.pre_processing import pad_data
 import tensorflow as tf
 
 from defs import SQUAD_DEV, SQUAD_TRAIN

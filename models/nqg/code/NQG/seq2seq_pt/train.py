@@ -124,6 +124,7 @@ def load_dev_data(translator, src_file, bio_file, feat_files, tgt_file):
             tgt_tokens = tgt.strip().split(' ')
             tgt_batch += [tgt_tokens]
             bio_tokens = bioF.readline().strip().split(' ')
+
             bio_batch += [bio_tokens]
             feats_tokens = [reader.readline().strip().split((' ')) for reader in featFs]
             feats_batch += [feats_tokens]

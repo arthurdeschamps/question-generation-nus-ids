@@ -1,9 +1,13 @@
-from functools import reduce
+import shutil
 from typing import List
 import numpy as np
 import tensorflow as tf
-import stanza
 from stanza import Document
+from data_processing.parse import read_medquad_raw_dataset
+from data_processing.utils import array_to_string
+import pandas as pd
+from defs import MEDQUAD_DEV, MEDQUAD_TRAIN, MEDQUAD_DIR
+import os
 
 
 def pad_data(data: List[np.ndarray], padding_value) -> List[tf.Tensor]:
@@ -18,10 +22,6 @@ def pad_data(data: List[np.ndarray], padding_value) -> List[tf.Tensor]:
     )
 
 
-def array_to_string(arr: np.ndarray) -> str:
-    return reduce(lambda t1, t2: t1 + " " + t2, arr)
-
-
 class NQGDataPreprocessor:
 
     def __init__(self, documents: List[Document]):
@@ -29,8 +29,7 @@ class NQGDataPreprocessor:
         :param documents: An array of analyzed documents.
         """
         super(NQGDataPreprocessor, self).__init__()
-        self.analyzed = documents
-        self.passages = list(list(passage.iter_words()) for passage in self.analyzed)
+        self.passages = list(list(passage.iter_words()) for passage in documents)
 
     def create_bio_sequences(self, answer_starts: np.ndarray, answer_lengths: np.ndarray) -> np.ndarray:
         """
@@ -40,10 +39,11 @@ class NQGDataPreprocessor:
         """
         bio_seqs = []
         for passage, answer_start, answer_length in zip(self.passages, answer_starts, answer_lengths):
-            bio = np.full(shape=len(passage), fill_value='O', dtype=np.str)
+            bio = list('O' for _ in range(len(passage)))
             bio[answer_start] = 'B'
             if answer_length > 1:
-                bio[answer_start+1:(answer_start + answer_length)] = 'I'
+                for i in range(answer_start+1, answer_start + answer_length):
+                    bio[i] = 'I'
             bio_seqs.append(array_to_string(bio))
         return bio_seqs
 
@@ -61,11 +61,11 @@ class NQGDataPreprocessor:
 
     def create_ner_sequences(self):
         ner_sequences = []
-        for passage in self.analyzed:
+        for passage in self.passages:
             # Takes care of creating the NER sequence
-            ner_sequence = np.full(shape=passage.num_tokens, fill_value='O', dtype=object)
+            ner_sequence = np.full(shape=len(passage), fill_value='O', dtype=object)
             i = 0
-            for word in passage.iter_words():
+            for word in passage:
                 token_ner = word.parent.ner
                 ner_sequence[i] = self._ner_mapping(token_ner if len(token_ner) == 1 else token_ner[2:])
                 i += 1
@@ -75,16 +75,16 @@ class NQGDataPreprocessor:
 
     def create_pos_sequences(self):
         pos_sequences = []
-        for passage in self.analyzed:
+        for passage in self.passages:
             # Creates the POS sequence
             pos_sequence = []
-            for word in passage.iter_words():
+            for word in passage:
                 pos_sequence.append(word.xpos)
             pos_sequences.append(array_to_string(pos_sequence))
         return np.array(pos_sequences)
 
     def uncased_sequences(self):
-        return list(array_to_string(list(str.lower(word.text) for word in sequence)) for sequence in self.passages)
+        return list(array_to_string(list(word.text.lower() for word in sequence)) for sequence in self.passages)
 
     def _ner_mapping(self, ne_type):
         if ne_type in ("PERSON", "MISC", "MONEY", "NUMBER", "ORDINAL", "PERCENT", "DATE",
@@ -101,3 +101,17 @@ class NQGDataPreprocessor:
         if ne_type in ("QUANTITY", "CARDINAL"):
             return "NUMBER"
         raise NotImplementedError(f"Named Entity type {ne_type} not recognized")
+
+
+def generate_medquad_dataset():
+    ds = read_medquad_raw_dataset()
+    train_size = int(0.8 * len(ds))
+    train = ds[:train_size]
+    dev = ds[train_size:]
+    if os.path.exists(MEDQUAD_DIR):
+        shutil.rmtree(MEDQUAD_DIR)
+    os.mkdir(MEDQUAD_DIR)
+    dev_df = pd.DataFrame(dev)
+    dev_df.to_csv(MEDQUAD_DEV, sep='|', index=False)
+    train_df = pd.DataFrame(train)
+    train_df.to_csv(MEDQUAD_TRAIN, sep='|', index=False)

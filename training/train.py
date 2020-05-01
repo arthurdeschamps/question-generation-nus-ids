@@ -3,7 +3,7 @@ import datetime
 import tensorflow as tf
 from transformers import BertTokenizer, TFBertModel
 from training.utils.embeddings import Embedder
-from data_utils.parse import read_bert_config
+from data_processing.parse import read_bert_config
 from models.bert import Bert
 from training.trainer import Trainer
 from training.utils.model_manager import ModelManager

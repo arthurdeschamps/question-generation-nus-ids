@@ -45,13 +45,19 @@ class Answer(JsonParsable):
         return Answer(json['text'], json['answer_start'])
 
 
-class SquadExample(JsonParsable):
+class QAExample:
 
-    def __init__(self, context: str, question: Question, answer: Answer):
-        super(SquadExample, self).__init__()
-        self.context = context
+    def __init__(self, question: Question, answer: Answer):
+        super(QAExample, self).__init__()
         self.question = question
         self.answer = answer
+
+
+class SquadExample(QAExample, JsonParsable):
+
+    def __init__(self, context: str, *args, **kwargs):
+        super(SquadExample, self).__init__(*args, **kwargs)
+        self.context = context
 
     @staticmethod
     def from_json(json) -> List[SquadExample]:

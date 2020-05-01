@@ -1,7 +1,7 @@
 from typing import List
 import numpy as np
 import tensorflow as tf
-from data_utils.class_defs import SquadExample, Question, Answer
+from data_processing.class_defs import SquadExample, Question, Answer
 
 
 class Embedder:
