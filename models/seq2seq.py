@@ -88,6 +88,7 @@ if __name__ == '__main__':
             "-verbose"
         ])
     elif args.action == 'predict':
+        raise NotImplementedError("Use directly seq2seq.Translate")
         model = NQG(args.model_path[0])
         model.generate_questions()
     else:

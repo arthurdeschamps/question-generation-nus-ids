@@ -1,13 +1,8 @@
-import shutil
 from typing import List
 import numpy as np
 import tensorflow as tf
 from stanza import Document
-from data_processing.parse import read_medquad_raw_dataset
 from data_processing.utils import array_to_string
-import pandas as pd
-from defs import MEDQUAD_DEV, MEDQUAD_TRAIN, MEDQUAD_DIR
-import os
 
 
 def pad_data(data: List[np.ndarray], padding_value) -> List[tf.Tensor]:
@@ -101,17 +96,3 @@ class NQGDataPreprocessor:
         if ne_type in ("QUANTITY", "CARDINAL"):
             return "NUMBER"
         raise NotImplementedError(f"Named Entity type {ne_type} not recognized")
-
-
-def generate_medquad_dataset():
-    ds = read_medquad_raw_dataset()
-    train_size = int(0.8 * len(ds))
-    train = ds[:train_size]
-    dev = ds[train_size:]
-    if os.path.exists(MEDQUAD_DIR):
-        shutil.rmtree(MEDQUAD_DIR)
-    os.mkdir(MEDQUAD_DIR)
-    dev_df = pd.DataFrame(dev)
-    dev_df.to_csv(MEDQUAD_DEV, sep='|', index=False)
-    train_df = pd.DataFrame(train)
-    train_df.to_csv(MEDQUAD_TRAIN, sep='|', index=False)

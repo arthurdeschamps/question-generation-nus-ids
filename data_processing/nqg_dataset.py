@@ -6,8 +6,8 @@ import stanza
 from stanza import Document
 
 from data_processing.class_defs import SquadExample, QAExample
-from data_processing.parse import read_squad_dataset, read_medquad_dataset
-from defs import SQUAD_DEV, SQUAD_TRAIN, MEDQUAD_TRAIN, MEDQUAD_DEV
+from data_processing.parse import read_squad_dataset, read_qa_dataset
+from defs import SQUAD_DEV, SQUAD_TRAIN, MEDQUAD_TRAIN, MEDQUAD_DEV, MEDQA_HANDMADE_FILEPATH
 
 
 class NQGDataset:
@@ -43,7 +43,13 @@ class NQGDataset:
                 datapath = MEDQUAD_DEV
             else:
                 raise ValueError()
-            self.ds = read_medquad_dataset(datapath, limit=data_limit)
+            self.ds = read_qa_dataset(datapath, limit=data_limit)
+        elif dataset_name == "medqa_handmade":
+            if mode == "test":
+                datapath = MEDQA_HANDMADE_FILEPATH
+            else:
+                raise ValueError()
+            self.ds = read_qa_dataset(datapath, limit=data_limit)
         else:
             raise NotImplementedError()
 

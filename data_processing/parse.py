@@ -1,6 +1,7 @@
 import json
 import logging
 import random
+import uuid
 import xml.etree.ElementTree as ET
 from typing import List, Dict
 import pandas as pd
@@ -94,14 +95,18 @@ def read_medquad_raw_dataset() -> List[Dict]:
     return ds
 
 
-def read_medquad_dataset(ds_path: str, limit=-1) -> List[QAExample]:
+def read_qa_dataset(ds_path: str, limit=-1) -> List[QAExample]:
     ds = pd.read_csv(ds_path, sep='|', index_col=None, nrows=None if limit == -1 else limit)
     exs = []
     for _, datapoint in ds.iterrows():
+        if 'sub_dataset' not in datapoint.keys() or 'filename' not in datapoint.keys():
+            question_id = uuid.uuid4()
+        else:
+            question_id = f"{datapoint['sub_dataset']}/{datapoint['filename']}"
         exs.append(QAExample(
             question=Question(
                 question=datapoint['question'],
-                question_id=f"{datapoint['sub_dataset']}/{datapoint['filename']}"
+                question_id=question_id
             ),
             answer=Answer(text=datapoint['answer'], answer_start=0)
         ))
