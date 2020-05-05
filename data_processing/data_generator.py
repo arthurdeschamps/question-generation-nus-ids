@@ -49,7 +49,7 @@ def generate_vocabulary_files(dataset_path, vocab_size):
         f.write(output)
 
 
-def generate_nqg_features(mode: str, dataset_name: str):
+def generate_nqg_features(mode: str, dataset_name: str, enhanced_ner: bool = False):
     if mode not in ("train", "dev", "test"):
         raise ValueError(f"mode should be one of 'train', 'dev' or 'test'")
 
@@ -66,11 +66,14 @@ def generate_nqg_features(mode: str, dataset_name: str):
         segments = ['test']
         data = [ds.get_dataset()]
 
+    if enhanced_ner:
+        dataset_name += "_+NER"
+
     for segment_type, segment_data in zip(segments, data):
         data_preprocessor = NQGDataPreprocessor(segment_data[0])
         answer_starts = np.array(list(answer.start_index for answer in segment_data[1]))
         answer_lengths = np.array(list(answer.nb_words for answer in segment_data[1]))
-        ner = data_preprocessor.create_ner_sequences()
+        ner = data_preprocessor.create_ner_sequences(enhanced_ner)
         bio = data_preprocessor.create_bio_sequences(answer_starts, answer_lengths)
         case = data_preprocessor.create_case_sequences()
         pos = data_preprocessor.create_pos_sequences()
@@ -132,6 +135,11 @@ if __name__ == '__main__':
     if args.dataset_name == 'nqg_squad':
         generate_nqg_features('dev', 'squad')
         generate_nqg_features('train', 'squad')
+    elif args.dataset_name == "nqg_squad_ner":
+        generate_nqg_features('dev', 'squad', enhanced_ner=True)
+        generate_nqg_features('train', 'squad', enhanced_ner=True)
+    elif args.dataset_name == "nqg_squad_ga":
+        pass
     elif args.dataset_name == 'nqg_medquad':
         generate_nqg_features('dev', 'medquad')
         generate_nqg_features('train', 'medquad')
@@ -142,4 +150,7 @@ if __name__ == '__main__':
         if not os.path.exists(f"{MEDQA_HANDMADE_DIR}/{args.filename}"):
             generate_medqa_handmade_dataset(filename)
         generate_nqg_features('test', 'medqa_handmade')
+    else:
+        raise ValueError("Non-existing dataset type")
+    print("Done")
 
