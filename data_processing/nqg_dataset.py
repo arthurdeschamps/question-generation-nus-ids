@@ -64,13 +64,11 @@ class NQGDataset:
                 answer = example.answer
                 start_index = None
                 end_index = None
-                i = 0
-                for word in analyzed.iter_words():
+                for i, word in enumerate(analyzed.iter_words()):
                     if start_index is None and word.text == answer.text[:len(word.text)]:
                         start_index = i
                     if start_index is not None and word.text == answer.text[-len(word.text):]:
                         end_index = i
-                    i += 1
                 if (start_index is None) or (end_index is None):
                     issues += 1
                     logging.warning(f"Issue while parsing answer '{answer.text}'")
@@ -93,6 +91,11 @@ class NQGDataset:
         return contexts, answers, questions
 
     def get_split(self, first_part_size_ratio: float):
+        """
+        :param first_part_size_ratio: Size ratio of the first returned dataset from the original one.
+        :return: A tuple (ds1, ds2) where ds1 is `first_part_size_ratio` of the original dataset
+        and ds2 the rest of it.
+        """
         c, a, q = self.get_dataset()
         ds = list(zip(c, a, q))
         random.shuffle(ds)

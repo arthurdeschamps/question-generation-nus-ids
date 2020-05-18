@@ -26,16 +26,17 @@ class Bert(BaseModel):
         self.pretrained_weights_name = self.embedder.pretrained_weights_name
 
         initializer = tf.initializers.glorot_uniform()
-        hidden_state_size = hidden_state_size
 
         # Simple linear layer used in conjunction with a softmax to output word distributions.
         self.W_sqg = tf.Variable(shape=(hidden_state_size, self.embedder.vocab_size()),
                                  dtype=tf.float32,
-                                 trainable=True,
+                                 trainable=False,
+                                 name="weight_head",
                                  initial_value=initializer(shape=(hidden_state_size, self.embedder.vocab_size())))
         self.b_sqg = tf.Variable(shape=(1, self.embedder.vocab_size()),
                                  dtype=tf.float32,
-                                 trainable=True,
+                                 trainable=False,
+                                 name="bias_head",
                                  initial_value=initializer(shape=(1, self.embedder.vocab_size())))
         self.beams_probs = tf.Variable(np.zeros(shape=(self.beam_search_size,)), dtype=tf.float32, trainable=False)
         self.ite = tf.Variable(0, dtype=tf.int32, trainable=False)

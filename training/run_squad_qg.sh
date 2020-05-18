@@ -2,7 +2,8 @@
 
 set -x
 
-DATAHOME=${@:(-4):1}
+DATAHOME=${@:(-5):1}
+BIO_DIR=${@:(-4):1}
 EXEHOME=${@:(-3):1}
 
 SAVEPATH=${@:(-2):1}
@@ -16,7 +17,7 @@ python3 train.py \
        -save_path ${SAVEPATH} -log_home ${SAVEPATH} \
        -online_process_data \
        -train_src ${DATAHOME}/train/data.txt.source.txt -src_vocab ${DATAHOME}/train/vocab.txt.pruned \
-       -train_bio ${DATAHOME}/train/data.txt.bio -bio_vocab ${DATAHOME}/train/bio.vocab.txt \
+       -train_bio ${BIO_DIR}/train/data.txt.bio -bio_vocab ${BIO_DIR}/train/bio.vocab.txt \
        -train_feats ${DATAHOME}/train/data.txt.pos ${DATAHOME}/train/data.txt.ner ${DATAHOME}/train/data.txt.case \
        -feat_vocab ${DATAHOME}/train/feat.vocab.txt \
        -train_tgt ${DATAHOME}/train/data.txt.target.txt -tgt_vocab ${DATAHOME}/train/vocab.txt.pruned \
@@ -32,7 +33,7 @@ python3 train.py \
        -seed 12345 -cuda_seed 12345 \
        -log_interval 100 \
        -dev_input_src ${DATAHOME}/dev/data.txt.source.txt \
-       -dev_bio ${DATAHOME}/dev/data.txt.bio \
+       -dev_bio ${BIO_DIR}/dev/data.txt.bio \
        -dev_feats ${DATAHOME}/dev/data.txt.pos ${DATAHOME}/dev/data.txt.ner ${DATAHOME}/dev/data.txt.case \
        -dev_ref ${DATAHOME}/dev/data.txt.target.txt \
        -max_sent_length 100 \

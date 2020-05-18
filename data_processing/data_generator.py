@@ -8,13 +8,13 @@ import stanza
 from data_processing.parse import read_medquad_raw_dataset
 from data_processing.utils import array_to_string
 from defs import NQG_MODEL_DIR, NQG_DATA_HOME, MEDQUAD_DIR, MEDQUAD_DEV, MEDQUAD_TRAIN, \
-    MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_DIR
+    MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_DIR, MEDQA_HANDMADE_RAW_DATASET_FILEPATH
 from data_processing.nqg_dataset import NQGDataset
 from data_processing.pre_processing import NQGDataPreprocessor
 import numpy as np
 
 
-def generate_vocabulary_files(dataset_path, vocab_size):
+def generate_vocabulary_files(dataset_path, bio_path, vocab_size):
 
     collect_vocab = f"{NQG_MODEL_DIR}/code/NQG/seq2seq_pt/CollectVocab.py"
     python = "python3"
@@ -28,8 +28,8 @@ def generate_vocabulary_files(dataset_path, vocab_size):
     subprocess.run([
         python,
         collect_vocab,
-        f"{dataset_path}/train/data.txt.bio",
-        f"{dataset_path}/train/bio.vocab.txt",
+        f"{bio_path}/train/data.txt.bio",
+        f"{bio_path}/train/bio.vocab.txt",
     ])
     subprocess.run([
         python,
@@ -50,8 +50,16 @@ def generate_vocabulary_files(dataset_path, vocab_size):
 
 
 def generate_nqg_features(mode: str, dataset_name: str, enhanced_ner: bool = False):
+    """
+    Generates the feature files for the NQG model.
+    :param mode: "Train", "Dev" or "Test". Will define which files will be used to generate the features.
+    :param dataset_name: "squad", "medquad", "medqa_handmade", ...
+    :param enhanced_ner: If the most up-to-date NER tags should be used, or the ones used by NQG.
+    """
     if mode not in ("train", "dev", "test"):
         raise ValueError(f"mode should be one of 'train', 'dev' or 'test'")
+    if dataset_name not in ("squad", "medquad", "medqa_handmade"):
+        raise ValueError("dataset_name argument not recognized")
 
     ds = NQGDataset(dataset_name=dataset_name, mode=mode)
     if mode == 'dev':
@@ -102,8 +110,8 @@ def generate_medquad_dataset():
     train_df.to_csv(MEDQUAD_TRAIN, sep='|', index=False)
 
 
-def generate_medqa_handmade_dataset(ds_filename):
-    ds_raw = pd.read_csv(f"{MEDQA_HANDMADE_DIR}/{ds_filename}", sep='|')
+def generate_medqa_handmade_dataset(ds_path):
+    ds_raw = pd.read_csv(ds_path, sep='|')
     tokenizer = stanza.Pipeline(lang='en', processors='tokenize')
     ds = []
     for question, answer in zip(ds_raw['question'], ds_raw['answer']):
@@ -124,12 +132,78 @@ def generate_medqa_handmade_dataset(ds_filename):
     pd.DataFrame(ds).to_csv(MEDQA_HANDMADE_FILEPATH, index=False, sep="|")
 
 
+def generate_bio_features(mode: str, ds_name: str, answer_mode: str):
+    assert answer_mode in ("none", "guess")
+    source_dir = f"{NQG_DATA_HOME}/{ds_name}/{mode}"
+    target_dir = f"{NQG_DATA_HOME}/{ds_name}"
+    if answer_mode == "none":
+        target_dir += "_NA"
+    else:
+        target_dir += "_GA"
+    assert os.path.exists(source_dir) and os.path.isdir(source_dir)
+
+    if not os.path.exists(target_dir):
+        os.mkdir(target_dir)
+    if not os.path.exists(f"{target_dir}/{mode}"):
+        os.mkdir(f"{target_dir}/{mode}")
+
+    if answer_mode == "none":
+        bios = []
+        source_passages = np.loadtxt(f"{source_dir}/data.txt.source.txt", dtype=str, delimiter='\n', comments=None)
+        for passage in source_passages:
+            bio = ["I" for _ in range(len(passage.split(" ")))]
+            bio[0] = "B"
+            bios.append(array_to_string(bio))
+
+    if answer_mode == "guess":
+        corpus_named_entities = np.loadtxt(f"{source_dir}/data.txt.ner", dtype=str, delimiter='\n', comments=None)
+        corpus_pos_tags = np.loadtxt(f"{source_dir}/data.txt.pos", dtype=str, delimiter='\n', comments=None)
+        bios = []
+        for named_entities, pos_tags in zip(corpus_named_entities, corpus_pos_tags):
+            named_entities = named_entities.split(' ')
+            longest_ne_seq = []
+            current_seq_length = []
+            for i in range(len(named_entities)):
+                ne = named_entities[i]
+                if ne != 'O':
+                    current_seq_length.append(i)
+                else:
+                    if len(current_seq_length) > len(longest_ne_seq):
+                        longest_ne_seq = current_seq_length
+                    current_seq_length = []
+            if len(longest_ne_seq) == 0:
+                # No named entities in this passage so we take the first noun phrase
+                pos_tags = pos_tags.split(' ')
+                try:
+                    bio = ["O" for _ in range(len(pos_tags))]
+                    i = 0
+                    while i < len(pos_tags):
+                        if pos_tags[i].startswith("NN"):
+                            bio[i] = "B"
+                            i += 1
+                            break
+                        i += 1
+                    while i < len(pos_tags) and pos_tags[i].startswith("NN"):
+                        bio[i] = "I"
+                        i += 1
+                except ValueError:
+                    # No noun either, we fallback on using the full passage as the answer
+                    bio = array_to_string(['B'] + ['I' for _ in range(len(named_entities) - 1)])
+            else:
+                bio = ['O' for _ in range(len(named_entities))]
+                bio[longest_ne_seq[0]] = "B"
+                for i in longest_ne_seq[1:]:
+                    bio[i] = "I"
+            bios.append(array_to_string(bio))
+
+    np.savetxt(f"{target_dir}/{mode}/data.txt.bio", bios, fmt="%s")
+
+
 if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset_name", type=str)
-    parser.add_argument("-filename", type=str, required=False)
     args = parser.parse_args()
 
     if args.dataset_name == 'nqg_squad':
@@ -139,16 +213,20 @@ if __name__ == '__main__':
         generate_nqg_features('dev', 'squad', enhanced_ner=True)
         generate_nqg_features('train', 'squad', enhanced_ner=True)
     elif args.dataset_name == "nqg_squad_ga":
-        pass
+        generate_bio_features('dev', 'squad', 'guess')
+        generate_bio_features('test', 'squad', 'guess')
+        generate_bio_features('train', 'squad', 'guess')
+    elif args.dataset_name == "nqg_squad_na":
+        generate_bio_features('dev', 'squad', 'none')
+        generate_bio_features('test', 'squad', 'none')
+        generate_bio_features('train', 'squad', 'none')
     elif args.dataset_name == 'nqg_medquad':
         generate_nqg_features('dev', 'medquad')
         generate_nqg_features('train', 'medquad')
     elif args.dataset_name == "nqg_medqa_handmade":
-        if args.filename is None:
-            raise ValueError("Please provide the name of the medqa_handmade csv file")
-        filename = args.filename.replace(".csv", "") + ".csv"
-        if not os.path.exists(f"{MEDQA_HANDMADE_DIR}/{args.filename}"):
-            generate_medqa_handmade_dataset(filename)
+        filepath = MEDQA_HANDMADE_RAW_DATASET_FILEPATH
+        if not os.path.exists(filepath):
+            generate_medqa_handmade_dataset(filepath)
         generate_nqg_features('test', 'medqa_handmade')
     else:
         raise ValueError("Non-existing dataset type")

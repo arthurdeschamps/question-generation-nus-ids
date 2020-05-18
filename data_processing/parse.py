@@ -25,8 +25,10 @@ def read_squad_dataset(dataset_path: str, limit=-1):
     ds = pd.read_json(dataset_path)
     ds = ds["data"][:limit]
     squad_examples = []
-    for examples in ds:
+    for i, examples in enumerate(ds):
         squad_examples.extend(SquadExample.from_json(examples))
+        if i == limit:
+            break
     return squad_examples
 
 

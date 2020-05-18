@@ -1,11 +1,14 @@
 import datetime
 
 import tensorflow as tf
-from transformers import BertTokenizer, TFBertModel
+from transformers import BertTokenizer, TFBertModel, TFGPT2Model, GPT2Tokenizer, TFGPT2LMHeadModel
+
+from data_processing.nqg_dataset import NQGDataset
+from training.gpt_trainer import GPTTrainer
 from training.utils.embeddings import Embedder
 from data_processing.parse import read_bert_config
 from models.bert import Bert
-from training.trainer import Trainer
+from training.bert_trainer import Trainer
 from training.utils.model_manager import ModelManager
 from training.utils.hlsqg_dataset import HlsqgDataset
 from defs import PRETRAINED_MODELS_DIR
@@ -13,7 +16,7 @@ from defs import PRETRAINED_MODELS_DIR
 flags = tf.compat.v1.flags
 
 FLAGS = flags.FLAGS
-flags.DEFINE_float('learning_rate', 5e-5, 'Initial learning rate for Adam.')
+flags.DEFINE_float('learning_rate', 1e-4, 'Initial learning rate for Adam.')
 flags.DEFINE_boolean('train', True, 'If training must be performed or only evaluating.')
 flags.DEFINE_integer('nb_epochs', 5, 'Number of epochs.')
 flags.DEFINE_integer('batch_size', 1, 'Batch size.  Must divide evenly into the dataset sizes.')
@@ -32,6 +35,11 @@ EPOCHS = FLAGS.nb_epochs
 debug = FLAGS.debug
 training = FLAGS.train
 
+gpus = len(tf.config.experimental.list_physical_devices('GPU'))
+print("Num GPUs Available: ", gpus)
+if gpus < 1:
+    exit(-1)
+
 for flag, flag_val in FLAGS.flag_values_dict().items():
     print(f"{flag}: {flag_val}")
 
@@ -39,19 +47,32 @@ if FLAGS.pretrained_model_name == "bert_base_uncased":
     pretrained_model_name = "bert-base-uncased"
     vocab_name = pretrained_model_name
     base_model = TFBertModel.from_pretrained(pretrained_model_name)
-    bert_config = base_model.config
+    config = base_model.config
+    tokenizer = BertTokenizer.from_pretrained(vocab_name)
+    trainer = Trainer
 elif FLAGS.pretrained_model_name == "bert_mini_uncased":
     pretrained_model_name = "uncased_L-4_H-256_A-4"
     vocab_name = f"{PRETRAINED_MODELS_DIR}/{pretrained_model_name}/"
-    bert_config = read_bert_config(pretrained_model_name)
-    base_model = TFBertModel(bert_config)
+    config = read_bert_config(pretrained_model_name)
+    base_model = TFBertModel(config)
     base_model = ModelManager.load_pretrained_model(base_model, f"{pretrained_model_name}/bert_model.ckpt.index")
+    tokenizer = BertTokenizer.from_pretrained(vocab_name)
+    trainer = Trainer
+elif FLAGS.pretrained_model_name == "gpt2":
+    pretrained_model_name = "gpt2"
+    vocab_name = "gpt2"
+    base_model = TFGPT2LMHeadModel.from_pretrained(pretrained_model_name)
+    tokenizer = GPT2Tokenizer.from_pretrained(vocab_name)
+    tokenizer.add_special_tokens({
+        "pad_token": "[PAD]"
+    })
+    config = base_model.config
+    trainer = GPTTrainer
 else:
     raise NotImplementedError()
 
-tokenizer = BertTokenizer.from_pretrained(vocab_name)
 embedder = Embedder(pretrained_model_name, tokenizer)
-model = Bert(embedder=embedder, model=base_model,  hidden_state_size=bert_config.hidden_size, max_sequence_length=512)
+model = Bert(embedder=embedder, model=base_model,  hidden_state_size=config.hidden_size, max_sequence_length=512)
 
 if FLAGS.load_model:
     if FLAGS.loaded_model_name is None:
@@ -73,7 +94,7 @@ else:
     dev_ds = ds.get_dev_set()
 
 
-trainer = Trainer(
+trainer = trainer(
     model, model_name=FLAGS.saved_model_name, print_predictions=FLAGS.print_predictions,
     optimizer=tf.optimizers.Adam(lr=FLAGS.learning_rate)
 )

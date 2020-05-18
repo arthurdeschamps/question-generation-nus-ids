@@ -108,11 +108,14 @@ def rouge_l_sentence_level(eval_sentences, ref_sentences):
   """
 
   f1_scores = []
-  for eval_sentence, ref_sentence in zip(eval_sentences, ref_sentences):
-    m = len(ref_sentence)
+  for eval_sentence, ref_sentences in zip(eval_sentences, ref_sentences):
     n = len(eval_sentence)
-    lcs = _len_lcs(eval_sentence, ref_sentence)
-    f1_scores.append(_f_lcs(lcs, m, n))
+    max_score = 0.0
+    for ref_sentence in ref_sentences:
+      m = len(ref_sentence)
+      lcs = _len_lcs(eval_sentence, ref_sentence)
+      max_score = max(max_score, _f_lcs(lcs, m, n))
+    f1_scores.append(max_score)
   return np.mean(f1_scores, dtype=np.float32)
 
 

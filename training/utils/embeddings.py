@@ -1,7 +1,11 @@
 from typing import List
 import numpy as np
 import tensorflow as tf
+from stanza import Document
+
 from data_processing.class_defs import SquadExample, Question, Answer
+from data_processing.nqg_dataset import NQGDataset
+from data_processing.pre_processing import NQGDataPreprocessor
 
 
 class Embedder:
@@ -16,8 +20,12 @@ class Embedder:
         self.tokenizer = tokenizer
 
         self.padding_token = tf.constant(self.tokenizer.pad_token_id, dtype=tf.int32)
-        self.mask_token = tf.constant(self.tokenizer.mask_token_id, dtype=tf.int32)
-        self.sep_token = tf.constant(self.tokenizer.sep_token_id, dtype=tf.int32)
+        self.mask_token = None
+        self.sep_token = None
+        if self.tokenizer.mask_token_id is not None:
+            self.mask_token = tf.constant(self.tokenizer.mask_token_id, dtype=tf.int32)
+        if self.tokenizer.sep_token_id is not None:
+            self.sep_token = tf.constant(self.tokenizer.sep_token_id, dtype=tf.int32)
 
         # Token to indicate where the answer resides in the context
         self.tokenizer.add_special_tokens({
@@ -44,8 +52,7 @@ class Embedder:
         old_input_tokens = tf.unstack(prev_tokens)
         new_input_tokens = []
         # Creates the new sequences
-        for old_input, input_end, predicted_token,\
-                in zip(old_input_tokens, sizes, unstacked_predicted_tokens):
+        for old_input, input_end, predicted_token in zip(old_input_tokens, sizes, unstacked_predicted_tokens):
             new_input_tokens.append(
                 tf.concat(
                     (old_input[:input_end - 1],  # this is the tokens we had so far (without mask)
@@ -58,44 +65,62 @@ class Embedder:
 
         return tf.stack(new_input_tokens, axis=0)
 
-    def generate_bert_hlsqg_input_embedding(self, context, answer: Answer):
+    def generate_bert_hlsqg_input_embedding(self, context: np.ndarray, bio: np.ndarray):
         """
         Generates embeddings according to the hlsqg schema (https://www.aclweb.org/anthology/D19-5821.pdf).
         :param context: A list of words representing the context, that is where the answer shall be found.
         :param answer: An answer object which content shall be part of the context.
         :return: An initial input embedding for BERT.
         """
-        context_lhs_tokens = self.tokenizer.tokenize(context[:answer.answer_start])
-        context_rhs_tokens = self.tokenizer.tokenize(context[answer.answer_start + len(answer.text):])
-        answer_tokens = self.tokenizer.tokenize(answer.text)
-        hl_token = self.tokenizer.tokenize(self.HL_TOKEN)[0]
+        start_index = np.where(bio == 'B')[0][0]
+        lhs = context[:start_index]
+        if start_index >= len(context):
+            answer = np.array([])
+            rhs = []
+        else:
+            answer = context[np.where(np.logical_or(bio == "B", bio == "I"))]
+            rhs = context[start_index + answer.shape[0]:]
 
-        tokens = (
-            self.tokenizer.cls_token,
-            *context_lhs_tokens,
-            hl_token,
-            *answer_tokens,
-            hl_token,
-            *context_rhs_tokens,
-            self.tokenizer.sep_token,
-            self.tokenizer.mask_token
-        )
-        return self.tokenizer.encode(tokens, add_special_tokens=False)
+        if "gpt" in self.pretrained_weights_name:
+            tokens = self.tokenizer.tokenize(" ".join([
+                *lhs,
+                self.HL_TOKEN,
+                *answer,
+                self.HL_TOKEN,
+                *rhs
+            ]))
+        else:
+            tokens = self.tokenizer.tokenize(" ".join([
+                self.tokenizer.cls_token,
+                *lhs,
+                self.HL_TOKEN,
+                *answer,
+                self.HL_TOKEN,
+                *rhs,
+                self.tokenizer.sep_token,
+                self.tokenizer.mask_token
+            ]))
+        embedding = self.tokenizer.encode(tokens)
+        return embedding
 
-    def generate_bert_hlsqg_output_embedding(self, question: Question):
-        output_tokens = self.tokenizer.encode(self.tokenizer.tokenize(question.question), add_special_tokens=False)
-        output_tokens.append(self.tokenizer.sep_token_id)
-        return output_tokens
+    def generate_bert_hlsqg_output_embedding(self, question: str):
+        tokenized = self.tokenizer.tokenize(question)
+        if "bert" in self.pretrained_weights_name:
+            tokenized.append(self.tokenizer.sep_token_id)
+        output_embedding = self.tokenizer.encode(tokenized)
+        return output_embedding
 
     def generate_bert_hlsqg_dataset(self,
-                                    squad_examples: List[SquadExample],
+                                    contexts,
+                                    questions,
+                                    bios,
                                     max_sequence_length,
                                     max_generated_question_length,
                                     limit=-1):
         """
         Generates a dataset for the HLSQG Bert architecture using the given SQuAD examples.
         :param limit: Number of datapoints to generate (-1 means no limit).
-        :param squad_examples: A list of squad example objects.
+        :param ds:
         :param max_sequence_length: The maximum sequence length supported by the model to be used with this dataset.
         :param max_generated_question_length: The generated questions maximum length.
         :return:
@@ -103,13 +128,12 @@ class Embedder:
         x = []
         y = []
         generated = 0
-        for squad_example in squad_examples:
+        for context, question, bio in zip(contexts, questions, bios):
             # [CLS], c_1, c_2, ..., [HL] a_1, ..., a_|A|m [HL], ..., c_|C|, [SEP], [MASK]
             # Where C is the context, A the answer (within the context, marked by special
             # characters [HL] ... [HL]).
-            question = squad_example.question
-            answer = squad_example.answer
-            input_emb = self.generate_bert_hlsqg_input_embedding(squad_example.context, answer)
+            input_emb = self.generate_bert_hlsqg_input_embedding(np.array(context.split()),
+                                                                 np.array(bio.split()))
             label_emb = self.generate_bert_hlsqg_output_embedding(question)
             # Maximum sequence length of this model
             if len(input_emb) < max_sequence_length - max_generated_question_length:

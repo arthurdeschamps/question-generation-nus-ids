@@ -1,10 +1,6 @@
 import subprocess
-from functools import reduce
-from defs import NQG_PREDS_OUTPUT_PATH, ROOT_DIR, NQG_MODEL_DIR, TRAINED_MODELS_DIR, NQG_DATA_HOME
+from defs import ROOT_DIR, NQG_MODEL_DIR, TRAINED_MODELS_DIR, NQG_DATA_HOME
 from data_processing.data_generator import generate_vocabulary_files
-
-ds_types = ("squad", "squad_GA", "squad_+NER", "medquad")
-ds_types_str = reduce(lambda t1, t2: t1 + "\n" + t2, ds_types)
 
 
 class NQG:
@@ -17,47 +13,43 @@ class NQG:
         self.model_path = model_path
 
     @staticmethod
-    def train(ds_name):
+    def train(dataset_name, dataset_dir, bio_data_dir):
         subprocess.run([
             "bash",
             f"{ROOT_DIR}/training/run_squad_qg.sh",
-            f"{NQG_DATA_HOME}/{ds_name}",
+            dataset_dir,
+            bio_data_dir,
             f"{NQG_MODEL_DIR}/code/NQG/seq2seq_pt",
-            f"{TRAINED_MODELS_DIR}/nqg/{ds_name}",
+            f"{TRAINED_MODELS_DIR}/nqg/{dataset_name}",
             ROOT_DIR,
-        ])
-
-    def generate_questions(self):
-        subprocess.run([
-            "python3",
-            f"{NQG_MODEL_DIR}/code/NQG/seq2seq_pt/translate.py",
-            "-model",
-            f"{ROOT_DIR}/{self.model_path}",
-            "-src",
-            f"{NQG_DATA_HOME}/dev/data.txt.source.txt",
-            "-bio",
-            f"{NQG_DATA_HOME}/dev/data.txt.bio",
-            "-feats",
-            f"{NQG_DATA_HOME}/dev/data.txt.pos",
-            f"{NQG_DATA_HOME}/dev/data.txt.ner",
-            f"{NQG_DATA_HOME}/dev/data.txt.case",
-            "-output",
-            NQG_PREDS_OUTPUT_PATH,
-            "-tgt",
-            f"{NQG_DATA_HOME}/dev/data.txt.target.txt",
-            "-verbose"
         ])
 
 
 if __name__ == '__main__':
+    ds_types = ("squad", "squad_GA", "squad_+NER", "medquad", "squad_NA")
+
     import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-vocab_size', help='Size of the vocabulary to use for training', default=20000)
-    parser.add_argument('-dataset_name', type=str, required=True,
-                        help=f"Name of the dataset to train on: \n{ds_types_str}")
+    parser.add_argument('-dataset_name', type=str, required=True, choices=ds_types,
+                        help=f"Name of the dataset to train on.")
 
     args = parser.parse_args()
     assert args.dataset_name in ds_types
-    generate_vocabulary_files(dataset_path=f"{NQG_DATA_HOME}/{args.dataset_name}", vocab_size=str(args.vocab_size))
-    NQG.train(args.dataset_name)
+
+    ds_name = args.dataset_name
+    data_home = f"{NQG_DATA_HOME}/"
+    if ds_name in ("squad", "medquad", "squad_+NER"):
+        data_home += ds_name
+        bio_dir = data_home
+    else:
+        data_home += "squad"
+        bio_dir = f"{NQG_DATA_HOME}/{ds_name}"
+
+    generate_vocabulary_files(
+        dataset_path=data_home,
+        bio_path=bio_dir,
+        vocab_size=str(args.vocab_size)
+    )
+    NQG.train(ds_name, data_home, bio_dir)
