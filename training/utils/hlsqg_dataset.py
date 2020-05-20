@@ -1,3 +1,4 @@
+from logging import info
 from typing import List
 
 from data_processing.class_defs import SquadExample
@@ -35,7 +36,7 @@ class HlsqgDataset:
 
     def get_train_set(self):
         ds, ds_size = self._prepare_data("train")
-        return ds.shuffle(buffer_size=ds_size, reshuffle_each_iteration=True)\
+        return ds.shuffle(buffer_size=1000, reshuffle_each_iteration=True)\
             .repeat(self.epochs)\
             .batch(self.batch_size, drop_remainder=True)
 
@@ -44,18 +45,20 @@ class HlsqgDataset:
 
     def _prepare_data(self, mode):
         def load_txt(name):
-            return np.loadtxt(f"{NQG_SQUAD_DATASET}/{mode}/{name}", dtype=np.str, delimiter='\n',
-                              max_rows=self.limit_train_data if mode == "train" else self.limit_dev_data)
+            limit = self.limit_train_data if mode == "train" else self.limit_dev_data
+            if limit == -1:
+                limit = None
+            return np.loadtxt(f"{NQG_SQUAD_DATASET}/{mode}/{name}", dtype=np.str, delimiter='\n', max_rows=limit,
+                              comments=None)
         contexts = np.reshape(load_txt("data.txt.source.txt"), (-1))
         questions = np.reshape(load_txt("data.txt.target.txt"), (-1))
         bio = np.reshape(load_txt("data.txt.bio"), (-1))
+        assert contexts.shape[0] == questions.shape[0] == bio.shape[0]
+
+        info(f"Loaded {contexts.shape[0]} examples.")
         contexts, questions = self.embedder.generate_bert_hlsqg_dataset(
-            contexts,
-            questions,
-            bio,
-            self.max_sequence_length, self.max_generated_question_length
+            contexts, questions, bio, self.max_sequence_length, self.max_generated_question_length
         )
-        padding_value = self.embedder.tokenizer.pad_token_id
-        contexts = pad_data(contexts, padding_value)
-        questions = pad_data(questions, padding_value)
+        contexts = pad_data(contexts, self.embedder.padding_token)
+        questions = pad_data(questions, self.embedder.padding_token)
         return tf.data.Dataset.from_tensor_slices((contexts, questions)), len(contexts)

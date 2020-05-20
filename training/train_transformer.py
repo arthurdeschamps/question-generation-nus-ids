@@ -1,13 +1,15 @@
 import datetime
 
 import tensorflow as tf
+from nltk.translate.bleu_score import sentence_bleu
 from transformers import BertTokenizer, TFBertModel, TFGPT2Model, GPT2Tokenizer, TFGPT2LMHeadModel
 
 from data_processing.nqg_dataset import NQGDataset
+from nltk.translate.bleu_score import sentence_bleu
 from training.gpt_trainer import GPTTrainer
 from training.utils.embeddings import Embedder
 from data_processing.parse import read_bert_config
-from models.bert import Bert
+from models.transformer import Transformer
 from training.bert_trainer import Trainer
 from training.utils.model_manager import ModelManager
 from training.utils.hlsqg_dataset import HlsqgDataset
@@ -35,9 +37,9 @@ EPOCHS = FLAGS.nb_epochs
 debug = FLAGS.debug
 training = FLAGS.train
 
-gpus = len(tf.config.experimental.list_physical_devices('GPU'))
-print("Num GPUs Available: ", gpus)
-if gpus < 1:
+gpus = tf.config.experimental.list_physical_devices('GPU')
+print("Num GPUs Available: ", len(gpus))
+if len(gpus) < 1:
     exit(-1)
 
 for flag, flag_val in FLAGS.flag_values_dict().items():
@@ -66,13 +68,14 @@ elif FLAGS.pretrained_model_name == "gpt2":
     tokenizer.add_special_tokens({
         "pad_token": "[PAD]"
     })
+    base_model.config.pad_token_id = tokenizer.pad_token_id
     config = base_model.config
     trainer = GPTTrainer
 else:
     raise NotImplementedError()
 
 embedder = Embedder(pretrained_model_name, tokenizer)
-model = Bert(embedder=embedder, model=base_model,  hidden_state_size=config.hidden_size, max_sequence_length=512)
+model = Transformer(embedder=embedder, model=base_model,  hidden_state_size=config.hidden_size, max_sequence_length=150)
 
 if FLAGS.load_model:
     if FLAGS.loaded_model_name is None:
@@ -92,7 +95,6 @@ if training:
 else:
     train_ds = None
     dev_ds = ds.get_dev_set()
-
 
 trainer = trainer(
     model, model_name=FLAGS.saved_model_name, print_predictions=FLAGS.print_predictions,
@@ -116,25 +118,37 @@ for epoch in range(EPOCHS):
         i = 0
         for features, labels in train_ds:
             prev_time = tf.timestamp()
-            step.assign(0)
-            total_loss.assign(0.0)
-            nb_losses.assign(0.0)
-            trainer.train_step(total_loss, nb_losses, features, labels, step, global_step)
-            tf.print("Step", i, " completed in ", (tf.timestamp() - prev_time), " seconds")
+            trainer.train_loss(trainer.train_step(features, labels, global_step))
+            if FLAGS.print_predictions:
+                tf.print("Step", i, " completed in ", (tf.timestamp() - prev_time), " seconds")
             i += 1
-            if (i % 200 == 0) and FLAGS.save_model:
+            if i % 100 == 0:
+                tf.print("Trained on ", i * FLAGS.batch_size * (epoch + 1), " examples. Mean loss: ",
+                         trainer.train_loss.result())
+            if (i % 2000 == 0) and FLAGS.save_model:
                 tf.print("Saving model...")
                 ModelManager.save_model(model, FLAGS.saved_model_name)
 
     for test_features, test_labels in dev_ds:
-        trainer.test_step(test_features, tf.squeeze(test_labels), global_step, FLAGS.log_test_metrics)
+        bleu, target, prediction = \
+             trainer.test_step(test_features, tf.squeeze(test_labels), global_step, FLAGS.log_test_metrics)
+        if debug:
+            tf.print("BLEU-4: ", bleu)
+            tf.print("Context: ", tokenizer.decode(test_features[0]))
+            tf.print("Target: ", target)
+            tf.print("Candidate: ", prediction, "\n")
+        trainer.test_loss(bleu)
+
+    if FLAGS.log_test_metrics:
+        with trainer.test_summary_writer.as_default():
+            tf.summary.scalar('dev_accuracy', trainer.test_loss.result(), step=global_step)
 
     #  template = 'Epoch {}, Loss: {}, Accuracy: {}, Test Loss: {}, Test Accuracy: {}'
     template = 'Epoch {}, Train Loss: {}, Mean Accuracy: {}, Test loss: {}'
     print(template.format(epoch + 1,
                           trainer.train_loss.result(),
                           trainer.train_accuracy.result() * 100,
-                          trainer.test_loss.result() * 100,
+                          trainer.test_loss.result(),
                           ))
 
     if FLAGS.save_model and training:

@@ -27,7 +27,7 @@ files shall be stored at /data/squad_dataset.
 your trained model.
 
 ### Make predictions (SQuAD dev set)
-**Command**: `seq2seq.py predict`
+**Command**: `seq2seq.py beam_search`
 
 **Description**: Makes predictions for the SQuAD dev set (see data format from section **train**).
 
@@ -93,7 +93,7 @@ These scores are to take with a grain of salt as the methodology is different fr
 
 **Goal**: Generate the interrogative word first and feed it to the predictive model to improve the correctness of the questions.
 
-**Idea**: One encoder that produces latent representations of the features and words, one to predict the interrogative word (which uses the former’s output vectors as input) and finally one decoder to produce the question.
+**Idea**: One encoder that produces latent representations of the features and words, one to beam_search the interrogative word (which uses the former’s output vectors as input) and finally one decoder to produce the question.
 
 **Best model**: The feature-rich encoder is a bi-LSTM, the interrogative word generator a simple LSTM and the decoder a simple LSTM with attention on its inputs. The first word fed to the decoder is the predicted interrogative word. They also use a copy mechanism and feed-forward neural network to produce word distributions. The loss function is a combination of both encoder’s loss (joint learning task).
 
@@ -111,7 +111,7 @@ MARCO -> BLEU-1: 55.67 BLEU-2: 38.16 BLEU-3: 28.12 BLEU-4: 21.59
 
 **Goal**: Improving the relevance and quality or questions.
 
-**Idea**: Improve the standard copy mechanism by potentially not copying a whole word but a morphological transformation of it and use a QA model to predict answers from generated questions and compute the F1 score between the gold answer and the generated one to allow re-ranking of most likely generated questions.
+**Idea**: Improve the standard copy mechanism by potentially not copying a whole word but a morphological transformation of it and use a QA model to beam_search answers from generated questions and compute the F1 score between the gold answer and the generated one to allow re-ranking of most likely generated questions.
 
 **Best model**: Seq2Seq model with partial copy mechanism and QA reranking. These two last features are original ideas from the paper while the former is a model borrowed from https://www.aclweb.org/anthology/N18-2090.pdf.
 
@@ -158,7 +158,7 @@ On SQuAD: BLEU-1: 46.41 BLEU-2: 30.66 BLEU-3: 22.42 BLEU-4: 16.99 ROUGE-L: 45.03
 **Goal**: See the benefits of generating the interrogative word and question in separate steps, the former with a classifier and the latter with a decoder.
 
 **Idea**: 
-First predict the interrogative word, feed it to the seq2seq model and this latter decides to use the word or not as its first predicted token. The answer in the paragraph is also indicated with an [ANS] … [ANS] pair of tokens.
+First beam_search the interrogative word, feed it to the seq2seq model and this latter decides to use the word or not as its first predicted token. The answer in the paragraph is also indicated with an [ANS] … [ANS] pair of tokens.
 
 **Best model**: 
 The 2 models are the following:
@@ -214,7 +214,7 @@ Fine-tuning with small datasets on the large model (>300mio params) might be uns
 - Uses WordPiece embeddings.
 
 Trained on 2 unsupervised tasks:
-- Masked LM: mask random words from the input (15%) and try to predict them
+- Masked LM: mask random words from the input (15%) and try to beam_search them
 - Next Sentence Prediction: Two sentences, 50% of the time B is the continuation of sentence A, and rest of the time it is a random sentence. Token C is used at the beginning of the input to specify which task is being solved.
 
 Transformer: 

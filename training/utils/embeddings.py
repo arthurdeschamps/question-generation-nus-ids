@@ -1,11 +1,12 @@
-from typing import List
+from logging import warning
+from typing import List, Generator
 import numpy as np
 import tensorflow as tf
 from stanza import Document
 
 from data_processing.class_defs import SquadExample, Question, Answer
 from data_processing.nqg_dataset import NQGDataset
-from data_processing.pre_processing import NQGDataPreprocessor
+from data_processing.pre_processing import NQGDataPreprocessor, pad_data
 
 
 class Embedder:
@@ -20,12 +21,12 @@ class Embedder:
         self.tokenizer = tokenizer
 
         self.padding_token = tf.constant(self.tokenizer.pad_token_id, dtype=tf.int32)
-        self.mask_token = None
-        self.sep_token = None
+        self.mask_token = tf.Variable(-1, name="mask_token", dtype=tf.int32, trainable=False)
+        self.sep_token = tf.Variable(-1, name="mask_token", dtype=tf.int32, trainable=False)
         if self.tokenizer.mask_token_id is not None:
-            self.mask_token = tf.constant(self.tokenizer.mask_token_id, dtype=tf.int32)
+            self.mask_token.assign(self.tokenizer.mask_token_id)
         if self.tokenizer.sep_token_id is not None:
-            self.sep_token = tf.constant(self.tokenizer.sep_token_id, dtype=tf.int32)
+            self.sep_token.assign(self.tokenizer.sep_token_id)
 
         # Token to indicate where the answer resides in the context
         self.tokenizer.add_special_tokens({
@@ -78,7 +79,13 @@ class Embedder:
             answer = np.array([])
             rhs = []
         else:
-            answer = context[np.where(np.logical_or(bio == "B", bio == "I"))]
+            answer_indices = np.where(np.logical_or(bio == "B", bio == "I"))
+            try:
+                answer = context[answer_indices]
+            except IndexError:
+                # TODO this happens even though it should never. Potentially a mismatch between bio and source
+                answer = np.array([])
+                warning("mismatch between bio and passage")
             rhs = context[start_index + answer.shape[0]:]
 
         if "gpt" in self.pretrained_weights_name:
@@ -107,7 +114,11 @@ class Embedder:
         tokenized = self.tokenizer.tokenize(question)
         if "bert" in self.pretrained_weights_name:
             tokenized.append(self.tokenizer.sep_token_id)
-        output_embedding = self.tokenizer.encode(tokenized)
+        try:
+            output_embedding = self.tokenizer.encode(tokenized)
+        except ValueError:
+            output_embedding = ["0"]
+            warning(f"Problem with tokens: {tokenized}")  # TODO solve this
         return output_embedding
 
     def generate_bert_hlsqg_dataset(self,
@@ -125,9 +136,11 @@ class Embedder:
         :param max_generated_question_length: The generated questions maximum length.
         :return:
         """
+        padding_value = self.tokenizer.pad_token_id
+
+        generated = 0
         x = []
         y = []
-        generated = 0
         for context, question, bio in zip(contexts, questions, bios):
             # [CLS], c_1, c_2, ..., [HL] a_1, ..., a_|A|m [HL], ..., c_|C|, [SEP], [MASK]
             # Where C is the context, A the answer (within the context, marked by special
@@ -141,7 +154,7 @@ class Embedder:
                 y.append(np.array(label_emb, dtype=np.int32))
                 generated += 1
                 if (limit > -1) and (generated >= limit):
-                    return x, y
+                    break
         return x, y
 
     def vocab_size(self):
