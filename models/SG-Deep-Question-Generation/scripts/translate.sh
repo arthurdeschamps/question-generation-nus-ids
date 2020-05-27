@@ -12,7 +12,7 @@ mkdir -p ${LOGHOME}
 cd ${EXEHOME}
 
 python translate.py \
-       -model ${MODELHOME}/generator_15.12441_bleu4.chkpt \
+       -model ${MODELHOME}/generator_grt_15.42482_bleu4.chkpt \
        -sequence_data ${DATAHOME}/preprocessed-data/preprcessed_sequence_data.pt \
        -graph_data ${DATAHOME}/preprocessed-data/preprcessed_graph_data.pt \
        -valid_data ${DATAHOME}/Datasets/valid_dataset.pt \

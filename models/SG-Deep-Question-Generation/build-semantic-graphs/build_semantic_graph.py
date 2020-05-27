@@ -15,8 +15,8 @@ json_load = lambda x: json.load(codecs.open(x, 'r', encoding='utf-8'))
 json_dump = lambda d, p: json.dump(d, codecs.open(p, 'w', 'utf-8'), indent=2, ensure_ascii=False)
 
 
-if __name__ == '__main__':
-    data = json_load(sys.argv[1])
+def run(data_path, questions, graph_save_path):
+    data = json_load(data_path)
 
     graphs = []
     for idx, sample in tqdm(enumerate(data), desc='   - (Building Graphs) -   '):
@@ -24,13 +24,17 @@ if __name__ == '__main__':
         evidence = []
         for sent in corpus:
             sent = build_tree(sent)
-            sent = {'sequence':sent['words'], 'tree':prune(sent['tree'], sent['words'])}
+            sent = {'sequence': sent['words'], 'tree': prune(sent['tree'], sent['words'])}
             sent = {'sequence': sent['sequence'], 'tree': rearrange(sent['tree'], sent['sequence'])}
-            evidence.append({'sequence':sent['sequence'], 'graph':get_graph(sent['tree'])})
+            evidence.append({'sequence': sent['sequence'], 'graph': get_graph(sent['tree'])})
         graph = merge(evidence)
         graphs.append(graph)
-    
-    questions = text_load(sys.argv[2])
+
     graphs = main(graphs, questions)
 
-    json_dump(graphs, sys.argv[3])
+    json_dump(graphs, graph_save_path)
+
+
+if __name__ == '__main__':
+    questions = text_load(sys.argv[2])
+    run(sys.argv[1], questions, sys.argv[3])

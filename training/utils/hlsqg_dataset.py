@@ -36,7 +36,7 @@ class HlsqgDataset:
 
     def get_train_set(self):
         ds, ds_size = self._prepare_data("train")
-        return ds.shuffle(buffer_size=1000, reshuffle_each_iteration=True)\
+        return ds.shuffle(buffer_size=5000, reshuffle_each_iteration=True)\
             .repeat(self.epochs)\
             .batch(self.batch_size, drop_remainder=True)
 

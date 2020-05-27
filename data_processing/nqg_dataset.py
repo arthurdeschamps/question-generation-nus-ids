@@ -4,6 +4,7 @@ from typing import List, Tuple
 
 import stanza
 from stanza import Document
+from tqdm import tqdm
 
 from data_processing.class_defs import SquadExample, QAExample
 from data_processing.parse import read_squad_dataset, read_qa_dataset
@@ -19,7 +20,7 @@ class NQGDataset:
             self.nb_words = nb_words
             self.text = text
 
-    def __init__(self, dataset_name="squad", mode="train", data_limit=-1):
+    def __init__(self, dataset_name="squad", mode="train", data_limit=-1, break_up_paragraphs=True):
         super(NQGDataset, self).__init__()
         stanza.download('en')
         self.nlp = stanza.Pipeline('en', processors='tokenize,pos,ner')
@@ -34,7 +35,8 @@ class NQGDataset:
                 raise ValueError()
             self.ds = read_squad_dataset(
                 datapath,
-                limit=data_limit
+                limit=data_limit,
+                break_up_paragraphs=break_up_paragraphs
             )
         elif dataset_name == "medquad":
             if mode == "train":
@@ -58,7 +60,8 @@ class NQGDataset:
         answers = []
         questions = []
         issues = 0
-        for example in self.ds:
+        logging.info("Analyzing dataset examples...")
+        for example in tqdm(self.ds):
             if self.datatype == SquadExample:
                 analyzed = self.nlp(example.context)
                 answer = example.answer

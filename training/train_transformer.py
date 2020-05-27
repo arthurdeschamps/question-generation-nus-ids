@@ -1,19 +1,19 @@
 import datetime
-
+import logging
+import os
+import shutil
 import tensorflow as tf
-from nltk.translate.bleu_score import sentence_bleu
-from transformers import BertTokenizer, TFBertModel, TFGPT2Model, GPT2Tokenizer, TFGPT2LMHeadModel
-
-from data_processing.nqg_dataset import NQGDataset
-from nltk.translate.bleu_score import sentence_bleu
+from defs import GRADIENT_DIR
+from transformers import BertTokenizer, TFBertModel, GPT2Tokenizer, TFGPT2LMHeadModel
 from training.gpt_trainer import GPTTrainer
 from training.utils.embeddings import Embedder
 from data_processing.parse import read_bert_config
 from models.transformer import Transformer
-from training.bert_trainer import Trainer
+from training.trainer import Trainer
 from training.utils.model_manager import ModelManager
 from training.utils.hlsqg_dataset import HlsqgDataset
 from defs import PRETRAINED_MODELS_DIR
+from nltk.translate.bleu_score import corpus_bleu
 
 flags = tf.compat.v1.flags
 
@@ -32,18 +32,20 @@ flags.DEFINE_integer('limit_train_data', -1, 'Number of rows to take from the tr
 flags.DEFINE_integer('limit_dev_data', -1, 'Number of rows to take from the dev set.')
 flags.DEFINE_boolean('log_test_metrics', True, 'Whether to log metrics for tensorboard at test time.')
 flags.DEFINE_boolean('print_predictions', True, 'Whether to print predictions at training time for each token.')
+flags.DEFINE_boolean('print_dev_predictions', False,
+                     'Whether to print predictions and BLEU score during the dev steps.')
 
 EPOCHS = FLAGS.nb_epochs
 debug = FLAGS.debug
 training = FLAGS.train
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
-print("Num GPUs Available: ", len(gpus))
+tf.print("Num GPUs Available: ", len(gpus))
 if len(gpus) < 1:
     exit(-1)
 
 for flag, flag_val in FLAGS.flag_values_dict().items():
-    print(f"{flag}: {flag_val}")
+    tf.print(f"{flag}: {flag_val}")
 
 if FLAGS.pretrained_model_name == "bert_base_uncased":
     pretrained_model_name = "bert-base-uncased"
@@ -74,8 +76,14 @@ elif FLAGS.pretrained_model_name == "gpt2":
 else:
     raise NotImplementedError()
 
+model_gradient_dir = f"{GRADIENT_DIR}/{FLAGS.saved_model_name}"
+if os.path.isdir(model_gradient_dir):
+    shutil.rmtree(model_gradient_dir)
+train_summary_writer = tf.summary.create_file_writer(f"{model_gradient_dir}/train")
+test_summary_writer = tf.summary.create_file_writer(f"{model_gradient_dir}/test")
+
 embedder = Embedder(pretrained_model_name, tokenizer)
-model = Transformer(embedder=embedder, model=base_model,  hidden_state_size=config.hidden_size, max_sequence_length=150)
+model = Transformer(embedder=embedder, model=base_model, hidden_state_size=config.hidden_size, max_sequence_length=150)
 
 if FLAGS.load_model:
     if FLAGS.loaded_model_name is None:
@@ -96,63 +104,74 @@ else:
     train_ds = None
     dev_ds = ds.get_dev_set()
 
+if not debug:
+    logger = tf.get_logger()
+    logger.setLevel(logging.ERROR)
+
 trainer = trainer(
-    model, model_name=FLAGS.saved_model_name, print_predictions=FLAGS.print_predictions,
+    model, print_predictions=FLAGS.print_predictions,
     optimizer=tf.optimizers.Adam(lr=FLAGS.learning_rate)
 )
-# This is the position of the pointer within sentences
-step = tf.Variable(0, dtype=tf.int32, name='step', trainable=False)
 # This is how many times backprob has been performed
-global_step = tf.Variable(0, dtype=tf.int64, name='global_step', trainable=False)
 total_loss = tf.Variable(0.0, dtype=tf.float32, name='sequence_loss', trainable=False)
 nb_losses = tf.Variable(0.0, dtype=tf.float32, name='nb_computed_losses', trainable=False)
 
+i = 0
+dev_score = tf.constant(0.0, dtype=tf.float32, name="dev_accuracy")
 for epoch in range(EPOCHS):
     # Reset the metrics at the start of the next epoch
-    trainer.train_loss.reset_states()
-    # train_accuracy.reset_states()
-    trainer.test_loss.reset_states()
-    # test_accuracy.reset_states()
+    trainer.train_accuracy.reset_states()
+
+    def dev_step(dev_size=500):
+        targets = []
+        predictions = []
+        for test_features, test_labels in dev_ds.take(dev_size):
+            target_tokens, prediction_tokens = \
+                trainer.test_step(test_features, tf.squeeze(test_labels), FLAGS.log_test_metrics)
+            targets.append([tokenizer.decode(target_tokens).replace("?", " ?").split()])
+            predictions.append(tokenizer.decode(prediction_tokens).replace("?", " ?").split())
+            if FLAGS.print_predictions:
+                print(f"Target: {targets[-1]}")
+                print(f"Predictions: {predictions[-1]}\n")
+
+        acc = corpus_bleu(targets, predictions) * 100
+        return acc
+
 
     if training:
-        i = 0
+        tf.print("Epoch ", epoch + 1, " started.")
+
         for features, labels in train_ds:
             prev_time = tf.timestamp()
-            trainer.train_loss(trainer.train_step(features, labels, global_step))
+            trainer.train_loss(trainer.train_step(features, labels))
             if FLAGS.print_predictions:
                 tf.print("Step", i, " completed in ", (tf.timestamp() - prev_time), " seconds")
             i += 1
-            if i % 100 == 0:
-                tf.print("Trained on ", i * FLAGS.batch_size * (epoch + 1), " examples. Mean loss: ",
-                         trainer.train_loss.result())
-            if (i % 2000 == 0) and FLAGS.save_model:
-                tf.print("Saving model...")
-                ModelManager.save_model(model, FLAGS.saved_model_name)
+            # Records the mean loss every 2000 sentences
+            if i * FLAGS.batch_size % 2000 == 0:
+                mean_loss = trainer.train_loss.result()
+                tf.print("Trained on ", i * FLAGS.batch_size, " examples. Mean loss: ", mean_loss)
+                with train_summary_writer.as_default():
+                    tf.summary.scalar('loss', mean_loss, step=i*FLAGS.batch_size)
+                trainer.train_loss.reset_states()
+            # Runs a dev step every 20000 sentences
+            if i * FLAGS.batch_size % 20000 == 0:
+                mean_accuracy = dev_step()
+                tf.print("Mean accuracy: ", mean_accuracy)
+                if mean_accuracy > dev_score:
+                    dev_score = mean_accuracy
+                    if FLAGS.save_model:
+                        tf.print("Saving model...")
+                        ModelManager.save_model(model, FLAGS.saved_model_name)
 
-    for test_features, test_labels in dev_ds:
-        bleu, target, prediction = \
-             trainer.test_step(test_features, tf.squeeze(test_labels), global_step, FLAGS.log_test_metrics)
-        if debug:
-            tf.print("BLEU-4: ", bleu)
-            tf.print("Context: ", tokenizer.decode(test_features[0]))
-            tf.print("Target: ", target)
-            tf.print("Candidate: ", prediction, "\n")
-        trainer.test_loss(bleu)
+                if FLAGS.log_test_metrics:
+                    with test_summary_writer.as_default():
+                        tf.summary.scalar('dev_accuracy', mean_accuracy, step=i*FLAGS.batch_size)
 
-    if FLAGS.log_test_metrics:
-        with trainer.test_summary_writer.as_default():
-            tf.summary.scalar('dev_accuracy', trainer.test_loss.result(), step=global_step)
-
-    #  template = 'Epoch {}, Loss: {}, Accuracy: {}, Test Loss: {}, Test Accuracy: {}'
-    template = 'Epoch {}, Train Loss: {}, Mean Accuracy: {}, Test loss: {}'
-    print(template.format(epoch + 1,
-                          trainer.train_loss.result(),
-                          trainer.train_accuracy.result() * 100,
-                          trainer.test_loss.result(),
-                          ))
-
-    if FLAGS.save_model and training:
-        print("Saving model...")
-        ModelManager.save_model(model, FLAGS.saved_model_name)
-
-
+        template = 'Epoch {}, Train Loss: {}, Mean Accuracy: {}'
+        tf.print(template.format(
+            epoch + 1, trainer.train_loss.result(), trainer.train_accuracy.result() * 100
+        ))
+    else:
+        tf.print("Accuracy :", dev_step(-1))
+tf.print("Training finished.")

@@ -69,7 +69,8 @@ def prepare_for_eval(preds: pd.DataFrame, targets: pd.DataFrame, test_passages: 
 if __name__ == '__main__':
 
     models = (
-        "nqg_squad", "nqg_squad_ga", "nqg_squad_na", "nqg_squad_ner", "nqg_medquad", "nqg_squad_testga"
+        "nqg_squad", "nqg_squad_ga", "nqg_squad_na", "nqg_squad_ner", "nqg_medquad", "nqg_squad_testga",
+        "sg_dqg_hotpotqa"
     )
 
     import argparse
@@ -104,7 +105,8 @@ if __name__ == '__main__':
     if model == "nqg_squad_testga":
         preds_path = NQG_SQUAD_TESTGA_PREDS_OUTPUT_PATH
         path = NQG_SQUAD_DATASET
-
+    if model == "sg_dqg_hopotqa":
+        raise NotImplementedError()
 
     path = f"{path}/test/data.txt."
     _targets = pd.read_csv(f"{path}target.txt", header=None, sep='\n')

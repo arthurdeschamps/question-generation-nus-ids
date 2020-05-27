@@ -199,6 +199,8 @@ dmypy.json
 
 data
 bert_model
+datasets
+logs
 trained
 models/pre_trained
 /*.sh

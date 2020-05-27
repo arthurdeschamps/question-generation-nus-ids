@@ -4,7 +4,7 @@ from torch import cuda
 import torch.nn as nn
 import argparse
 from tqdm import tqdm
-
+from numpy import loadtxt
 from onqg.utils.translate import Translator
 from onqg.dataset import Dataset
 from onqg.utils.model_builder import build_model
@@ -22,6 +22,8 @@ def dump(data, filename):
 
 
 def main(opt):
+    if opt.cuda:
+        cuda.set_device(opt.gpus[0])
     device = torch.device('cuda' if opt.cuda else 'cpu')
 
     checkpoint = torch.load(opt.model)
@@ -33,7 +35,11 @@ def main(opt):
     sequences = torch.load(opt.sequence_data)
     seq_vocabularies = sequences['dict']
 
-    validData = torch.load(opt.valid_data)
+    if hasattr(opt, "valid_data"):
+        validData = torch.load(opt.valid_data)
+    else:
+        validData = loadtxt(opt.valid_data_txt, delimiter='\n', comments=None, dtype=str)
+        validData = torch.tensor(validData, requires_grad=False)
     validData.batchSize = opt.batch_size
     validData.numBatches = math.ceil(len(validData.src) / validData.batchSize)
 
@@ -66,7 +72,5 @@ if __name__ == '__main__':
 
     opt = parser.parse_args()
     opt.cuda = True if opt.gpus else False
-    if opt.cuda:
-        cuda.set_device(opt.gpus[0])
     
     main(opt)

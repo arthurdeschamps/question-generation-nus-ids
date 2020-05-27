@@ -446,4 +446,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='preprocess.py')
     pargs.add_options(parser)
     opt = parser.parse_args()
+    print(opt)
+    exit()
     main(opt)

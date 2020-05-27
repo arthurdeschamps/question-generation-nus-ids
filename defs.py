@@ -2,7 +2,8 @@ import os
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-NQG_MODEL_DIR = f"{ROOT_DIR}/models/nqg"
+MODELS_DIR = f"{ROOT_DIR}/models"
+NQG_MODEL_DIR = f"{MODELS_DIR}/nqg"
 
 DATA_DIR = f"{ROOT_DIR}/data"
 PROCESSED_DATA_DIR = f"{DATA_DIR}/processed"
@@ -35,8 +36,11 @@ NQG_MEDQUAD_DATASET = f"{NQG_DATA_HOME}/medquad"
 NQG_SQUAD_DATASET = f"{NQG_DATA_HOME}/squad"
 NQG_SQUAD_NER_DATASET = f"{NQG_DATA_HOME}/squad_+NER"
 
-TRAINED_MODELS_DIR = f"{ROOT_DIR}/models/trained"
-PRETRAINED_MODELS_DIR = f"{ROOT_DIR}/models/pre_trained"
+TRAINED_MODELS_DIR = f"{MODELS_DIR}/trained"
+PRETRAINED_MODELS_DIR = f"{MODELS_DIR}/pre_trained"
 
 LOGS_DIR = f"{TRAINED_MODELS_DIR}/logs"
 GRADIENT_DIR = f"{LOGS_DIR}/gradient_tape"
+
+SG_DQG_DIR = f"{MODELS_DIR}/SG-Deep-Question-Generation"
+SG_DQG_DATA = f"{PROCESSED_DATA_DIR}/sg_dql"

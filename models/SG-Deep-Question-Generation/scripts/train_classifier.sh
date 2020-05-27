@@ -2,6 +2,8 @@
 
 set -x
 
+HOME=$PWD
+
 DATAHOME=${HOME}/datasets
 EXEHOME=${HOME}/src
 MODELHOME=${HOME}/models
@@ -13,8 +15,8 @@ mkdir -p ${LOGHOME}
 cd ${EXEHOME}
 
 python train.py \
-       -sequence_data ${DATAHOME}/preprcessed-data/preprcessed_sequence_data.pt \
-       -graph_data ${DATAHOME}/preprcessed-data/preprcessed_graph_data.pt \
+       -sequence_data ${DATAHOME}/preprocessed-data/preprocessed_sequence_data.pt \
+       -graph_data ${DATAHOME}/preprocessed-data/preprocessed_graph_data.pt \
        -train_dataset ${DATAHOME}/Datasets/train_dataset.pt \
        -valid_dataset ${DATAHOME}/Datasets/valid_dataset.pt \
        -epoch 100 \

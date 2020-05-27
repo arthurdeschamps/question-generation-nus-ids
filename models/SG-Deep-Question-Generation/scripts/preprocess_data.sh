@@ -1,7 +1,6 @@
 #!/bin/bash
 
 set -x
-
 DATAHOME=${HOME}/datasets
 EXEHOME=${HOME}/src
 
@@ -15,8 +14,8 @@ python preprocess.py \
        -node_feature \
        -copy \
        -answer \
-       -save_sequence_data ${DATAHOME}/preprocessed-data/preprcessed_sequence_data.pt \
-       -save_graph_data ${DATAHOME}/preprocessed-data/preprcessed_graph_data.pt \
+       -save_sequence_data ${DATAHOME}/preprocessed-data/preprocessed_sequence_data.pt \
+       -save_graph_data ${DATAHOME}/preprocessed-data/preprocessed_graph_data.pt \
        -train_dataset ${DATAHOME}/Datasets/train_dataset.pt \
        -valid_dataset ${DATAHOME}/Datasets/valid_dataset.pt \
        -src_seq_length 200 -tgt_seq_length 50 \

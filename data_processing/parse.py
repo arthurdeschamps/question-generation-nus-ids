@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from typing import List, Dict
 import pandas as pd
 import stanza
+from tqdm import tqdm
 from transformers import BertConfig
 
 from data_processing.utils import array_to_string
@@ -15,9 +16,11 @@ import os
 from data_processing.class_defs import QAExample
 
 
-def read_squad_dataset(dataset_path: str, limit=-1):
+def read_squad_dataset(dataset_path: str, limit=-1, break_up_paragraphs=True):
     """
     Loads a squad dataset (json format) from the given path.
+    :param break_up_paragraphs: If the "context" fields should only contain the sentences where the answer spans, or
+    the full paragraph.
     :param dataset_path: Path to a json formatted SQuAD dataset.
     :param limit: Limit to the number of paragraphs to load.
     :return: A list of SquadExample objects.
@@ -25,8 +28,9 @@ def read_squad_dataset(dataset_path: str, limit=-1):
     ds = pd.read_json(dataset_path)
     ds = ds["data"][:limit]
     squad_examples = []
-    for i, examples in enumerate(ds):
-        squad_examples.extend(SquadExample.from_json(examples))
+    logging.info("Read squad examples...")
+    for i, examples in tqdm(enumerate(ds)):
+        squad_examples.extend(SquadExample.from_json(examples, break_up_paragraphs=break_up_paragraphs))
         if i == limit:
             break
     return squad_examples

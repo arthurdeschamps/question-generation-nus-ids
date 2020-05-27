@@ -1,4 +1,3 @@
-from __future__ import annotations
 from abc import ABC
 from typing import List, Dict
 import nltk
@@ -22,7 +21,7 @@ class Question(JsonParsable):
         self.question_id = question_id
 
     @staticmethod
-    def from_json(json) -> Question:
+    def from_json(json) -> 'Question':
         q = Question(json['question'], json['id'])
         try:
             question_mark_ind = str.index(q.question, "?")
@@ -41,7 +40,7 @@ class Answer(JsonParsable):
         self.answer_start = answer_start
 
     @staticmethod
-    def from_json(json) -> Answer:
+    def from_json(json) -> 'Answer':
         return Answer(json['text'], json['answer_start'])
 
 
@@ -60,7 +59,7 @@ class SquadExample(QAExample, JsonParsable):
         self.context = context
 
     @staticmethod
-    def from_json(json) -> List[SquadExample]:
+    def from_json(json, break_up_paragraphs=True) -> List['SquadExample']:
         squad_examples = []
         for paragraph in json['paragraphs']:
             sentences_bounds = SquadExample.get_sentences_bounds(paragraph['context'])
@@ -74,12 +73,15 @@ class SquadExample(QAExample, JsonParsable):
                         start_indices.add(answer.answer_start)
                         texts.add(answer.text)
                         question = Question.from_json(qa)
-                        context = SquadExample.get_answer_context(answer, paragraph['context'], sentences_bounds)
+                        if break_up_paragraphs:
+                            context = SquadExample.get_answer_context(answer, sentences_bounds)
+                        else:
+                            context = paragraph['context']
                         squad_examples.append(SquadExample(context, question, answer))
         return squad_examples
 
     @staticmethod
-    def get_answer_context(answer: Answer, context: str, sentences_bounds: Dict[int, str]):
+    def get_answer_context(answer: Answer, sentences_bounds: Dict[int, str]):
         sentence_start = 0
         for bound in sentences_bounds.keys():
             if answer.answer_start < bound:

@@ -1,6 +1,6 @@
 import functools
 
-from training.bert_trainer import Trainer
+from training.trainer import Trainer
 import tensorflow as tf
 
 
@@ -8,8 +8,7 @@ class GPTTrainer(Trainer):
 
     def train_step(self,
                    paragraph_tokens,
-                   ref_question,
-                   global_step: tf.Variable):
+                   ref_question):
 
         losses = []
         preds = [[] for _ in range(ref_question.shape[0])]
@@ -31,22 +30,17 @@ class GPTTrainer(Trainer):
                     if ref != self.embedder.padding_token:
                         preds[ind].append(predictions[ind])
                 losses.append(token_loss)
-
         if self.print_predictions:
             for i, pred in enumerate(preds):
                 ref = self.embedder.tokenizer.decode(ref_question[i])
                 pred = self.embedder.tokenizer.decode(tf.stack(pred))
                 paragraph = self.embedder.tokenizer.decode(paragraph_tokens[i])
                 tf.print(paragraph, "\n", ref, "\n", pred, "\n")
-        global_step.assign(global_step + 1)
-
-        with self.train_summary_writer.as_default():
-            total_loss = tf.reduce_mean(losses)
-            tf.summary.scalar('loss', total_loss, step=global_step)
+        total_loss = tf.reduce_mean(losses)
         return total_loss
 
     @tf.function
-    def test_step(self, paragraph_tokens, target_question_tokens, global_step, log_metrics):
+    def test_step(self, paragraph_tokens, target_question_tokens, log_metrics):
         context_type_ids = tf.zeros_like(paragraph_tokens, dtype=tf.int32)
 
         def _produce_distribution(beams):
@@ -66,14 +60,7 @@ class GPTTrainer(Trainer):
             logits = all_logits[:, -1]
             return tf.math.softmax(logits, axis=1)
 
-        self.test_loss.reset_states()
         predicted_tokens = self.model.beam_search(paragraph_tokens, _produce_distribution)
-
-        def compute_accuracy(target_question, generated_question):
-            target_question = self.embedder.tokenizer.decode(target_question.numpy()).replace("?", " ?")
-            generated_question = self.embedder.tokenizer.decode(generated_question.numpy()).replace("?", " ?")
-            acc = self.test_accuracy([target_question.split()], generated_question.split()) * 100
-            return acc, target_question, generated_question
 
         def without_padding(tokens):
             return tf.reshape(tf.gather(
@@ -81,13 +68,9 @@ class GPTTrainer(Trainer):
             ), shape=(-1,))
         target_question_tokens = without_padding(target_question_tokens)
         predicted_tokens = without_padding(predicted_tokens)
-        return tf.py_function(
-            compute_accuracy,
-            inp=[target_question_tokens, predicted_tokens],
-            Tout=[tf.float32, tf.string, tf.string]
-        )
+        return target_question_tokens, predicted_tokens
 
-    #@tf.function
+    @tf.function
     def token_pred_and_loss(self, context: tf.Tensor, past, target: tf.Tensor, token_type_ids: tf.Tensor):
         with tf.GradientTape() as tape:
             mask = tf.cast(tf.not_equal(context, self.embedder.padding_token),
@@ -101,17 +84,18 @@ class GPTTrainer(Trainer):
             )
             past = tf.stack(past, axis=0)
             logits = all_logits[:, -1]
+
             predictions = tf.math.argmax(tf.math.softmax(logits, axis=-1, name="train_logits"),
                                          axis=-1, output_type=target.dtype, name="train_predictions")
             mask = tf.cast(tf.not_equal(target, self.embedder.padding_token), dtype=tf.int32, name="loss_mask")
-            target = target * mask
-            loss = self.train_loss_object(target, logits)
+            target = tf.multiply(target, mask, name="masked_target")
+            loss = tf.pow(2.0, self.train_loss_object(target, logits))
             # Needs to account for padding tokens
-            mask = tf.cast(mask, loss.dtype)
-            non_padding_count = tf.reduce_sum(mask)
+            mask = tf.cast(mask, loss.dtype, name="mask")
+            non_padding_count = tf.reduce_sum(mask, name="non_padding_output")
 
-            loss = tf.reduce_sum(loss * mask) / non_padding_count
-
+            loss = tf.divide(tf.reduce_sum(tf.multiply(loss, mask, name="masked_loss"),
+                                           name="total_masked_loss"), non_padding_count, name="mean_masked_loss")
             gradients = tape.gradient(loss, self.model.trainable_variables)
             self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
             # Only apply gradient if there is at least one non-padding input
