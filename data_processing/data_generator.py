@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -8,7 +9,8 @@ import stanza
 from data_processing.parse import read_medquad_raw_dataset
 from data_processing.utils import array_to_string
 from defs import NQG_MODEL_DIR, NQG_DATA_HOME, MEDQUAD_DIR, MEDQUAD_DEV, MEDQUAD_TRAIN, \
-    MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_DIR, MEDQA_HANDMADE_RAW_DATASET_FILEPATH
+    MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_DIR, MEDQA_HANDMADE_RAW_DATASET_FILEPATH, HOTPOT_QA_DEV_JSON, \
+    HOTPOT_QA_DEV_TARGETS_PATH
 from data_processing.nqg_dataset import NQGDataset
 from data_processing.pre_processing import NQGDataPreprocessor
 import numpy as np
@@ -199,6 +201,15 @@ def generate_bio_features(mode: str, ds_name: str, answer_mode: str):
     np.savetxt(f"{target_dir}/{mode}/data.txt.bio", bios, fmt="%s")
 
 
+def generate_hotpot_targets(json_data_path, savepath):
+    with open(json_data_path) as f:
+        hotpot_data = json.load(f)
+        targets = []
+        for example in hotpot_data:
+            targets.append(" ".join(nltk.word_tokenize(example['question'].trim().lower())))
+    np.savetxt(savepath, targets, fmt="%s", delimiter="\n", comments=None)
+
+
 if __name__ == '__main__':
     import argparse
 
@@ -228,6 +239,10 @@ if __name__ == '__main__':
         if not os.path.exists(filepath):
             generate_medqa_handmade_dataset(filepath)
         generate_nqg_features('test', 'medqa_handmade')
+    elif args.dataset_name == "hotpotqa_dev_targets":
+        dev_json = HOTPOT_QA_DEV_JSON
+        result_save_path = HOTPOT_QA_DEV_TARGETS_PATH
+        generate_hotpot_targets(dev_json, result_save_path)
     else:
         raise ValueError("Non-existing dataset type")
     print("Done")

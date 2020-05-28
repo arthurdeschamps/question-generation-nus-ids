@@ -66,7 +66,8 @@ def build_detailed_tree(sequence, all_dep, root, word_type):
     ##=== initialize tree-node ===##
     element = all_dep[root]
     word_type = 'V' if element['pos'] in verb_pos else 'A'
-    node = {'word': [sequence[root]], 'index': [root], 'type': word_type, 'dep': element['dep'], 'pos': element['pos']}
+    node = {'word': [sequence[root]], 'index': [root], 'type': word_type, 'dep': element['dep'], 'pos': element['pos'],
+            'ans': element['ans']}
     ##=== classify child node sets ===##
     children = [(i, elem) for i, elem in enumerate(all_dep) if elem['head'] == root]
     nouns = [child for child in children if is_noun(child[1])]

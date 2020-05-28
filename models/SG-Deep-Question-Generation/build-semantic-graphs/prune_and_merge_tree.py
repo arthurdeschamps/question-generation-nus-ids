@@ -80,7 +80,7 @@ def prune(node, sequence):
     slf = merge(slf, sequence)
     ## get final node
     wrap = {'dep':slf['dep'], 'word':slf['word'], 'index':slf['index'], 'pos':slf['pos'], 
-            'type':slf['type'], 'noun':Ns, 'verb':Vs}
+            'type':slf['type'], 'noun':Ns, 'verb':Vs, 'ans': slf['ans']}
     if 'attribute' in slf:
         wrap['attribute'] = slf['attribute']    
     if not Ns:

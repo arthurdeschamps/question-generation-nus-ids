@@ -6,7 +6,8 @@ import pandas as pd
 import numpy as np
 from defs import NQG_MEDQUAD_DATASET, NQG_MEDQUAD_PREDS_OUTPUT_PATH, NQG_SQUAD_PREDS_OUTPUT_PATH, \
     NQG_SQUAD_GA_PREDS_OUTPUT_PATH, NQG_SQUAD_NA_PREDS_OUTPUT_PATH, NQG_SQUAD_NER_PREDS_OUTPUT_PATH, \
-    NQG_SQUAD_DATASET, NQG_SQUAD_NER_DATASET, NQG_SQUAD_TESTGA_PREDS_OUTPUT_PATH
+    NQG_SQUAD_DATASET, NQG_SQUAD_NER_DATASET, NQG_SQUAD_TESTGA_PREDS_OUTPUT_PATH, SG_DQG_HOTPOT_PREDS_PATH, \
+    HOTPOT_QA_DEV_TARGETS_PATH
 
 
 def corpus_f1_score(corpus_candidates, corpus_references):
@@ -66,6 +67,19 @@ def prepare_for_eval(preds: pd.DataFrame, targets: pd.DataFrame, test_passages: 
     return corpus_candidates, corpus_references
 
 
+def get_sg_dqg_hotpotqa_data():
+    preds = []
+    refs = []
+    with open(SG_DQG_HOTPOT_PREDS_PATH) as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("<gold>"):
+                refs.append([line[len("<gold>\t"):]])
+            elif line.startswith("<pred>"):
+                preds.append(line[len("<pred>\t"):])
+    return preds, refs
+
+
 if __name__ == '__main__':
 
     models = (
@@ -86,40 +100,46 @@ if __name__ == '__main__':
     path = None
     preds_path = None
     check_trainset = False
-    if model == "nqg_squad":
-        preds_path = NQG_SQUAD_PREDS_OUTPUT_PATH
-        path = NQG_SQUAD_DATASET
-    if model == "nqg_squad_ga":
-        preds_path = NQG_SQUAD_GA_PREDS_OUTPUT_PATH
-        path = NQG_SQUAD_DATASET
-    if model == "nqg_squad_na":
-        preds_path = NQG_SQUAD_NA_PREDS_OUTPUT_PATH
-        path = NQG_SQUAD_DATASET
-    if model == "nqg_squad_ner":
-        preds_path = NQG_SQUAD_NER_PREDS_OUTPUT_PATH
-        path = NQG_SQUAD_NER_DATASET
-    if model == "nqg_medquad":
-        preds_path = NQG_MEDQUAD_PREDS_OUTPUT_PATH
-        path = NQG_MEDQUAD_DATASET
-        check_trainset = True
-    if model == "nqg_squad_testga":
-        preds_path = NQG_SQUAD_TESTGA_PREDS_OUTPUT_PATH
-        path = NQG_SQUAD_DATASET
-    if model == "sg_dqg_hopotqa":
-        raise NotImplementedError()
+    candidates, references = None, None
 
-    path = f"{path}/test/data.txt."
-    _targets = pd.read_csv(f"{path}target.txt", header=None, sep='\n')
-    _test_passages = pd.DataFrame(np.loadtxt(f"{path}source.txt", delimiter='\n', dtype=str, comments=None))
-    _train_passages = pd.read_csv(f"{NQG_MEDQUAD_DATASET}/train/data.txt.source.txt", sep='\n', header=None)
-    # loads predictions
-    _preds = pd.read_csv(preds_path, header=None, sep='\n')
-    # Removes copy characters [[copied word]] -> copied word
-    for i in _preds.index:
-        _preds.at[i, 0] = _preds.iloc[i, 0].replace("[[", "").replace("]]", "")
-    if check_trainset:
-        candidates, references = prepare_for_eval(_preds, _targets, _test_passages, _train_passages)
-    else:
-        candidates = np.array(_preds.values).reshape((-1,))
-        references = np.array(_targets.values).reshape((-1, 1))
+    if "nqg" in model:
+        if model == "nqg_squad":
+            preds_path = NQG_SQUAD_PREDS_OUTPUT_PATH
+            path = NQG_SQUAD_DATASET
+        if model == "nqg_squad_ga":
+            preds_path = NQG_SQUAD_GA_PREDS_OUTPUT_PATH
+            path = NQG_SQUAD_DATASET
+        if model == "nqg_squad_na":
+            preds_path = NQG_SQUAD_NA_PREDS_OUTPUT_PATH
+            path = NQG_SQUAD_DATASET
+        if model == "nqg_squad_ner":
+            preds_path = NQG_SQUAD_NER_PREDS_OUTPUT_PATH
+            path = NQG_SQUAD_NER_DATASET
+        if model == "nqg_medquad":
+            preds_path = NQG_MEDQUAD_PREDS_OUTPUT_PATH
+            path = NQG_MEDQUAD_DATASET
+            check_trainset = True
+        if model == "nqg_squad_testga":
+            preds_path = NQG_SQUAD_TESTGA_PREDS_OUTPUT_PATH
+            path = NQG_SQUAD_DATASET
+
+        path = f"{path}/test/data.txt."
+        _targets = pd.read_csv(f"{path}target.txt", header=None, sep='\n')
+        _test_passages = pd.DataFrame(np.loadtxt(f"{path}source.txt", delimiter='\n', dtype=str, comments=None))
+        _train_passages = pd.read_csv(f"{NQG_MEDQUAD_DATASET}/train/data.txt.source.txt", sep='\n', header=None)
+        # loads predictions
+        _preds = pd.read_csv(preds_path, header=None, sep='\n')
+        # Removes copy characters [[copied word]] -> copied word
+        for i in _preds.index:
+            _preds.at[i, 0] = _preds.iloc[i, 0].replace("[[", "").replace("]]", "")
+        if check_trainset:
+            candidates, references = prepare_for_eval(_preds, _targets, _test_passages, _train_passages)
+        else:
+            candidates = np.array(_preds.values).reshape((-1,))
+            references = np.array(_targets.values).reshape((-1, 1))
+
+    elif "sg_dqg" in model:
+        if model == "sg_dqg_hotpotqa":
+            candidates, references = get_sg_dqg_hotpotqa_data()
+
     benchmark(candidates, references)

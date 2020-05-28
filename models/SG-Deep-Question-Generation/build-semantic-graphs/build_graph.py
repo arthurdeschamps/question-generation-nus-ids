@@ -30,7 +30,8 @@ subj = ['nsubj', 'nsubjpass', 'csubj', 'csubjpass']
 def count_nodes(nodes, tree):
     ## initialize node
     str_words = ' '.join(tree['word'])
-    node = {'type': tree['type'], 'dep': tree['dep'], 'pos':tree['pos'], 'word': str_words, 'index':tree['index']}
+    node = {'type': tree['type'], 'dep': tree['dep'], 'pos':tree['pos'], 'word': str_words, 'index':tree['index'],
+            'ans': tree['ans']}
     ## merge almost the same nodes as one node if meet requirements
     for idx, exist in enumerate(nodes):
         # requirement one: has common words and has the same type

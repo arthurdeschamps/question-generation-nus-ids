@@ -4,7 +4,7 @@ set -x
 
 HOME=$PWD
 
-DATAHOME=${HOME}/datasets
+DATAHOME=${@:(-1):1}
 EXEHOME=${HOME}/src
 MODELHOME=${HOME}/models
 LOGHOME=${HOME}/logs

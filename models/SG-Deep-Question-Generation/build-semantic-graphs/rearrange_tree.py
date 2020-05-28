@@ -59,7 +59,7 @@ def rearrange(node, sequence):
                 indexes = node['index'] + noun[0]['index']
                 indexes.sort(key=lambda x: x)
                 wrap = {'dep':noun[0]['dep'], 'word':[sequence[i] for i in indexes], 'index':indexes,
-                        'pos':noun[0]['pos'], 'type': 'M'}
+                        'pos':noun[0]['pos'], 'type': 'M', 'ans': node['ans']}
                 if 'attribute' in noun[0]:
                     wrap['attribute'] = noun[0]['attribute']
                 return wrap
@@ -85,7 +85,7 @@ def rearrange(node, sequence):
         del slf['attribute']
     ## get final node
     wrap = {'dep':slf['dep'], 'word':slf['word'], 'index':slf['index'], 'pos':slf['pos'], 
-            'type':slf['type'], 'noun':noun, 'verb':verb}
+            'type':slf['type'], 'noun':noun, 'verb':verb, 'ans': slf['ans']}
     if 'attribute' in slf:
         wrap['attribute'] = slf['attribute']
     if not noun:

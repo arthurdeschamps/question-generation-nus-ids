@@ -15,12 +15,17 @@ json_load = lambda x: json.load(codecs.open(x, 'r', encoding='utf-8'))
 
 
 def load_vocab(filename):
+    import psutil
     vocab_dict = {}
     with open(filename, 'r', encoding='utf-8') as f:
-        text = f.read().strip().split('\n')
-    text = [word.split(' ') for word in text]
-    vocab_dict = {word[0]:word[1:] for word in text}
-    vocab_dict = {k:[float(d) for d in v] for k,v in vocab_dict.items()}
+        for i, line in enumerate(f):
+            if i % 10000 == 0:
+                mem = psutil.virtual_memory()
+                break
+                if mem.percent > 50.0:
+                    break
+            word, *embedding = line.strip().split(' ')
+            vocab_dict[word] = [float(d) for d in embedding]
     return vocab_dict
 
 
@@ -226,7 +231,7 @@ def sequence_data(opt):
         src_vocab = tgt_vocab = vocab
     else:
         print("build src vocabulary")
-        if opt.pretrained:
+        if len(opt.pretrained) > 0:
             options = {'separate':False, 'tgt':False, 'lower':True}
             src_vocab = Vocab.from_opt(pretrained=opt.pretrained, opt=options)
         else:
@@ -234,12 +239,13 @@ def sequence_data(opt):
             options = {'lower':True, 'mode':'size', 'tgt':False, 
                        'size':opt.src_vocab_size, 'frequency':opt.src_words_min_frequency}
             src_vocab = Vocab.from_opt(corpus=corpus, opt=options)
-            ans_vocab = src_vocab if opt.answer else None
-        
+
         print("build tgt vocabulary")
         options = {'lower':True, 'mode':opt.vocab_trunc_mode, 'tgt':True, 
                    'size':opt.tgt_vocab_size, 'frequency':opt.tgt_words_min_frequency}
         tgt_vocab = Vocab.from_opt(corpus=train_tgt, opt=options)
+
+    ans_vocab = src_vocab if opt.answer else None
     
     options = {'lower':False, 'mode':'size', 'size':opt.feat_vocab_size, 
                'frequency':opt.feat_words_min_frequency, 'tgt':False}
@@ -432,14 +438,14 @@ def main(opt):
     torch.save(sequences, opt.save_sequence_data)
     torch.save(graphs, opt.save_graph_data)
     print('Saving Datasets ......')
-    trainData = Dataset(sequences['train'], graphs['train'], opt.batch_size, answer=opt.answer,
-                        node_feature=opt.node_feature, copy=opt.copy)
+    #trainData = Dataset(sequences['train'], graphs['train'], opt.batch_size, answer=opt.answer,
+    #                    node_feature=opt.node_feature, copy=opt.copy)
     validData = Dataset(sequences['valid'], graphs['valid'], opt.batch_size, answer=opt.answer,
                         node_feature=opt.node_feature, copy=opt.copy)
-    torch.save(trainData, opt.train_dataset)
+    #torch.save(trainData, opt.train_dataset)
     torch.save(validData, opt.valid_dataset)
     print("Done .")
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
 
 
 if __name__ == '__main__':
