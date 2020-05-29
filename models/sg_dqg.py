@@ -1,20 +1,17 @@
 import argparse
 import codecs
 import json
-import os
-import subprocess
 import sys
 from logging import warning, info, debug
 from pathlib import Path
 from allennlp.predictors.predictor import Predictor
 import allennlp_models.coref  # Required
 import allennlp_models.syntax.biaffine_dependency_parser  # Required
-from nltk.tree import Tree
 import numpy as np
 from tqdm import tqdm
 from data_processing.sg_dqg_dataset import SGDQGDataset
 from data_processing.utils import answer_span
-from defs import SG_DQG_DIR, RESULTS_DIR, GLOVE_PATH, SG_DQG_SQUAD_DATA, SG_DQG_HOTPOT_PREDS_PATH
+from defs import SG_DQG_DIR, GLOVE_PATH, SG_DQG_SQUAD_DATA, SG_DQG_HOTPOT_PREDS_PATH
 
 sys.path.append(f"{SG_DQG_DIR}/build-semantic-graphs")
 sys.path.append(f"{SG_DQG_DIR}/src")
@@ -72,6 +69,7 @@ def dependency_parsing(resolved_corefs, updated_bios):
             pred = predictor.predict(
                 sentence=evidence
             )
+
             nodes = []
             for i in range(len(pred['words'])):
                 nodes.append({
@@ -87,57 +85,50 @@ def dependency_parsing(resolved_corefs, updated_bios):
 
 
 def coreference_resolution(evidences_list, answers):
-    updated_bios = []
+    ans_indicators = []
     predictor = Predictor.from_path(
         "https://storage.googleapis.com/allennlp-public-models/coref-spanbert-large-2020.02.27.tar.gz",
         cuda_device=0
     )
     coreferences_list = []
-    kept_indices = []
     info("Performing coreference resolutions...")
     for i, (evidences, answer) in tqdm(enumerate(zip(evidences_list, answers))):
         cr_solved_words = []
         for evidence in evidences:
-            try:
-                cr = predictor.predict(
-                    document=str(evidence['text'])
-                )
-                words = cr['document']
-                substitutions = {}
-                start_index, end_index = answer_span(words, answer.split(' '))
-                if start_index is None or end_index is None:
-                    warning(f"Error with answer \"{answer}\"")
-                    bio = [0 for _ in range(len(words))]
+            cr = predictor.predict(
+                document=str(evidence['text'])
+            )
+            words = cr['document']
+            substitutions = {}
+            start_index, end_index = answer_span(words, answer.split(' '))
+            if start_index is None or end_index is None:
+                warning(f"Error with answer \"{answer}\"")
+                bio = [0 for _ in range(len(words))]
+            else:
+                bio = [1 if i in range(start_index, end_index+1) else 0 for i in range(len(words))]
+            for span_index, span in enumerate(cr['top_spans']):
+                # Pronouns have only one word
+                if span[1] == span[0] and cr['predicted_antecedents'][span_index] > -1:
+                    antecedent_span = cr['top_spans'][cr['predicted_antecedents'][span_index]]
+                    left = antecedent_span[0]
+                    right = antecedent_span[1]
+                    substitutions[span[0]] = {
+                        "text": words[left:right + 1],
+                        "bio": bio[left:right + 1]
+                    }
+            resolved = []
+            ans_indicator = []
+            for word_index in range(len(words)):
+                if word_index in substitutions:
+                    resolved.extend(substitutions[word_index]['text'])
+                    ans_indicator.extend(substitutions[word_index]['bio'])
                 else:
-                    bio = [1 if i in range(start_index, end_index) else 0 for i in range(len(words))]
-                for span_index, span in enumerate(cr['top_spans']):
-                    # Pronouns have only one word
-                    if span[1] == span[0] and cr['predicted_antecedents'][span_index] > -1:
-                        antecedent_span = cr['top_spans'][cr['predicted_antecedents'][span_index]]
-                        left = antecedent_span[0]
-                        right = antecedent_span[1]
-                        substitutions[span[0]] = {
-                            "text": words[left:right + 1],
-                            "bio": bio[left:right + 1]
-                        }
-                resolved = []
-                updated_bio = []
-                for word_index in range(len(words)):
-                    if word_index in substitutions:
-                        resolved.extend(substitutions[word_index]['text'])
-                        updated_bio.extend(substitutions[word_index]['bio'])
-                    else:
-                        resolved.append(words[word_index])
-                        updated_bio.append(bio[word_index])
-                updated_bios.append(updated_bio)
-                cr_solved_words.append(resolved)
-                kept_indices.append(i)
-            except TypeError as e:
-                warning(f"Couldn't run coreference resolution on:\n\"{evidence}\"")
-                debug(e)
-                cr_solved_words.append([])
+                    resolved.append(words[word_index])
+                    ans_indicator.append(bio[word_index])
+            ans_indicators.append(ans_indicator)
+            cr_solved_words.append(resolved)
         coreferences_list.append(cr_solved_words)
-    return kept_indices, coreferences_list, updated_bios
+    return coreferences_list, ans_indicators
 
 
 def merge_dps_and_crefs(data_path, dependencies_path, coreferences_path, result_path):
@@ -205,10 +196,10 @@ def preprocess(dataset_name, graph_type="dp"):
                 Path(text_data_save_dir).mkdir(parents=False, exist_ok=True)
 
                 ds = {'train': SGDQGDataset(
-                    dataset_name=dataset_name, data_limit=10, mode='train'
+                    dataset_name=dataset_name, data_limit=5, mode='train'
                 ).get_dataset()}
                 dev_data = SGDQGDataset(
-                    dataset_name=dataset_name, data_limit=10, mode='dev'
+                    dataset_name=dataset_name, data_limit=None, mode='dev'
                 ).get_split(0.5)
                 ds['dev'] = dev_data[:3]
                 ds['test'] = dev_data[3:]
@@ -227,30 +218,31 @@ def preprocess(dataset_name, graph_type="dp"):
                         "text": context,
                     }] for ind, context in enumerate(contexts))
 
-                    kept_indices, coref_resolved_context_tokens, updated_bios = coreference_resolution(
+                    coref_resolved_context_tokens, ans_indicators = coreference_resolution(
                         evidences_list, answers
                     )
                     cr_contexts = [[" ".join(context) for context in contexts] for contexts in
                                    coref_resolved_context_tokens]
-                    dependencies = dependency_parsing(cr_contexts, updated_bios)
+
+                    dependencies = dependency_parsing(cr_contexts, ans_indicators)
                     json_dump(dependencies, deps_path)
                     json_dump(coref_resolved_context_tokens, crefs_path)
 
                     sources = []
-                    for evidences, cr_evidences in zip(evidences_list, cr_contexts):
-                        for evidence, cr_evidence in zip(evidences, cr_evidences):
+                    for cr_evidences, evidences in zip(cr_contexts, evidences_list):
+                        for cr_evidence, evidence in zip(cr_evidences, evidences):
                             evidence["text"] = cr_evidence
                             sources.append(cr_evidence)
 
                     data = list({
-                        "question": question,
-                        "answer": answer,
-                        "evidence": evidences
-                    } for question, answer, evidences in zip(questions, answers, evidences_list))
-                    json_dump([data[i] for i in kept_indices], data_path)
+                        "question": questions[i],
+                        "answer": answers[i],
+                        "evidence": evidences_list[i]
+                    } for i in range(len(evidences_list)))
+                    json_dump(data, data_path)
                     save_txt_data(sources, f"{data_type}.src.txt")
-                    save_txt_data([questions[i] for i in kept_indices], f"{data_type}.tgt.txt")
-                    save_txt_data([answers[i] for i in kept_indices], f"{data_type}.ans.txt")
+                    save_txt_data([d["question"] for d in data], f"{data_type}.tgt.txt")
+                    save_txt_data([d["answer"] for d in data], f"{data_type}.ans.txt")
                     merged_result_path = f"{json_save_dir}/{data_type}.merged.json"
                     merge_dps_and_crefs(data_path, deps_path, crefs_path, merged_result_path)
                     graph_result_path = f"{json_save_dir}/{data_type}.dp.tag.json"

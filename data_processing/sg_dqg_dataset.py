@@ -1,9 +1,7 @@
 import re
-from logging import warning
-import nltk
 from data_processing.dataset import Dataset
 from data_processing.parse import read_squad_dataset
-from data_processing.utils import answer_span
+import spacy
 
 
 class SGDQGDataset(Dataset):
@@ -12,22 +10,29 @@ class SGDQGDataset(Dataset):
         super(SGDQGDataset, self).__init__(*args, **kwargs)
         if self.dataset_name == "squad":
             self.ds = read_squad_dataset(self.datapath, self.data_limit, break_up_paragraphs=True)
-            self.ds = list(self.ds[i] for i in range(self.data_limit))
+            if self.data_limit is not None and self.data_limit > 0:
+                self.ds = list(self.ds[i] for i in range(self.data_limit))
         elif self.dataset_name == "hotpotqa":
             raise NotImplementedError()
         else:
             raise NotImplementedError(f"Unrecognized dataset name {self.dataset_name} for SG DQL.")
+        self.tokenizer = spacy.load("en_core_web_sm")
 
     def get_dataset(self):
         # Removes double whitespaces
-        def clean(s):
-            return " ".join(nltk.word_tokenize(re.sub(' +', ' ', s)))
+        cleaned_ds = {"contexts": [], "answers": [], "questions": []}
+        for ex in self.ds:
+            cleaned = []
+            for s in (ex.context, ex.answer.text, ex.question.question):
+                tokens = self.tokenizer(re.sub(' +', ' ', s.replace('\n', ' ').strip()))
+                tokens = [token.text for token in tokens]
+                if len(tokens) > 1:
+                    cleaned.append(" ".join(tokens))
+                else:
+                    break
+            if len(cleaned) == 3:
+                cleaned_ds["contexts"].append(cleaned[0])
+                cleaned_ds["answers"].append(cleaned[1])
+                cleaned_ds["questions"].append(cleaned[2])
 
-        questions = list(clean(ex.question.question) for ex in self.ds)
-        answers = list(clean(ex.answer.text) for ex in self.ds)
-        contexts = list(clean(ex.context) for ex in self.ds)
-        for i in range(len(contexts)):
-            answer = self.ds[i].answer
-            context = contexts[i].split(' ')
-        assert len(questions) == len(answers) == len(contexts)
-        return contexts, answers, questions
+        return cleaned_ds.values()
