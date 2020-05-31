@@ -19,9 +19,8 @@ def load_vocab(filename):
     vocab_dict = {}
     with open(filename, 'r', encoding='utf-8') as f:
         for i, line in enumerate(f):
-            if i % 10000 == 0:
+            if i % 50000 == 0:
                 mem = psutil.virtual_memory()
-                break
                 if mem.percent > 50.0:
                     break
             word, *embedding = line.strip().split(' ')
@@ -112,7 +111,7 @@ def convert_word_to_idx(text, vocab, lower=True, sep=False, pretrained=''):
     return indexes, tokens, index_dict
 
 
-def get_embedding(vocab_dict, vocab):
+def get_embedding(vocab_dict, vocab, opt):
 
     def get_vector(idx):
         word = vocab.idxToLabel[idx]
@@ -274,9 +273,9 @@ def sequence_data(opt):
 
     #========== prepare pretrained vetors ==========#
     if pre_trained_vocab:
-        pre_trained_src_vocab = None if opt.pretrained else get_embedding(pre_trained_vocab, src_vocab)
-        pre_trained_ans_vocab = get_embedding(pre_trained_vocab, ans_vocab) if opt.answer else None
-        pre_trained_tgt_vocab = get_embedding(pre_trained_vocab, tgt_vocab)
+        pre_trained_src_vocab = None if opt.pretrained else get_embedding(pre_trained_vocab, src_vocab, opt)
+        pre_trained_ans_vocab = get_embedding(pre_trained_vocab, ans_vocab, opt) if opt.answer else None
+        pre_trained_tgt_vocab = get_embedding(pre_trained_vocab, tgt_vocab, opt)
         pre_trained_vocab = {'src':pre_trained_src_vocab, 'tgt':pre_trained_tgt_vocab}
 
     #========== save data ===========#
@@ -438,11 +437,11 @@ def main(opt):
     torch.save(sequences, opt.save_sequence_data)
     torch.save(graphs, opt.save_graph_data)
     print('Saving Datasets ......')
-    #trainData = Dataset(sequences['train'], graphs['train'], opt.batch_size, answer=opt.answer,
-    #                    node_feature=opt.node_feature, copy=opt.copy)
+    trainData = Dataset(sequences['train'], graphs['train'], opt.batch_size, answer=opt.answer,
+                        node_feature=opt.node_feature, copy=opt.copy)
     validData = Dataset(sequences['valid'], graphs['valid'], opt.batch_size, answer=opt.answer,
                         node_feature=opt.node_feature, copy=opt.copy)
-    #torch.save(trainData, opt.train_dataset)
+    torch.save(trainData, opt.train_dataset)
     torch.save(validData, opt.valid_dataset)
     print("Done .")
     #import ipdb; ipdb.set_trace()

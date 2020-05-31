@@ -122,14 +122,7 @@ def main(opt, logger):
     trainer.train(device)
 
 
-if __name__ == '__main__':
-    ##### ==================== parse the options ==================== #####
-    parser = argparse.ArgumentParser(description='train.py')
-    xargs.add_data_options(parser)
-    xargs.add_model_options(parser)
-    xargs.add_train_options(parser)
-    opt = parser.parse_args()
-
+def run(opt):
     ##### ==================== prepare the logger ==================== #####
     logging.basicConfig(format='%(asctime)s [%(levelname)s:%(name)s]: %(message)s', level=logging.INFO)
     log_file_name = time.strftime("%Y%m%d-%H%M%S") + '.log.txt'
@@ -141,3 +134,12 @@ if __name__ == '__main__':
     logger = logging.getLogger(__name__)
 
     main(opt, logger)
+
+if __name__ == '__main__':
+    ##### ==================== parse the options ==================== #####
+    parser = argparse.ArgumentParser(description='train.py')
+    xargs.add_data_options(parser)
+    xargs.add_model_options(parser)
+    xargs.add_train_options(parser)
+    opt = parser.parse_args()
+    run(opt)

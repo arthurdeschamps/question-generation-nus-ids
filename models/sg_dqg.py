@@ -4,6 +4,8 @@ import json
 import sys
 from logging import warning, info, debug
 from pathlib import Path
+
+import spacy
 from allennlp.predictors.predictor import Predictor
 import allennlp_models.coref  # Required
 import allennlp_models.syntax.biaffine_dependency_parser  # Required
@@ -20,6 +22,7 @@ from translate import main as sg_dqg_translate
 from merge import merge
 from build_semantic_graph import run as build_semantic_graph
 from preprocess import main as create_sg_dqg_dataset
+from train import run
 
 
 def json_load(x):
@@ -63,9 +66,10 @@ def dependency_parsing(resolved_corefs, updated_bios):
     )
     dps = []
     info("Performing dependency parsing...")
-    for ev_index, evidences in tqdm(enumerate(resolved_corefs)):
+    for paragraph_index, evidences in tqdm(enumerate(resolved_corefs)):
         dp = []
-        for evidence in evidences:
+        bio_index = 0
+        for ev_index, evidence in enumerate(evidences):
             pred = predictor.predict(
                 sentence=evidence
             )
@@ -77,58 +81,48 @@ def dependency_parsing(resolved_corefs, updated_bios):
                     'pos': pred['pos'][i],
                     'dep': pred['predicted_dependencies'][i],
                     'word': pred['words'][i],
-                    'ans': updated_bios[ev_index][i]
+                    'ans': updated_bios[paragraph_index][bio_index + i]
                 })
+            bio_index += len(pred['words'])
             dp.append(nodes)
         dps.append(dp)
     return dps
 
 
-def coreference_resolution(evidences_list, answers):
+def coreference_resolution(contexts, answers):
     ans_indicators = []
-    predictor = Predictor.from_path(
-        "https://storage.googleapis.com/allennlp-public-models/coref-spanbert-large-2020.02.27.tar.gz",
-        cuda_device=0
-    )
-    coreferences_list = []
+    coreferences = []
     info("Performing coreference resolutions...")
-    for i, (evidences, answer) in tqdm(enumerate(zip(evidences_list, answers))):
-        cr_solved_words = []
-        for evidence in evidences:
-            cr = predictor.predict(
-                document=str(evidence['text'])
-            )
-            words = cr['document']
-            substitutions = {}
-            start_index, end_index = answer_span(words, answer.split(' '))
-            if start_index is None or end_index is None:
-                warning(f"Error with answer \"{answer}\"")
-                bio = [0 for _ in range(len(words))]
+    for i, (cr, answer) in tqdm(enumerate(zip(contexts, answers))):
+        words = cr['document']
+        substitutions = {}
+        start_index, end_index = answer_span(words, answer.split(' '))
+        if start_index is None or end_index is None:
+            bio = [0 for _ in range(len(words))]
+        else:
+            bio = [1 if i in range(start_index, end_index+1) else 0 for i in range(len(words))]
+        for span_index, span in enumerate(cr['top_spans']):
+            # Pronouns have only one word
+            if span[1] == span[0] and cr['predicted_antecedents'][span_index] > -1:
+                antecedent_span = cr['top_spans'][cr['predicted_antecedents'][span_index]]
+                left = antecedent_span[0]
+                right = antecedent_span[1]
+                substitutions[span[0]] = {
+                    "text": words[left:right + 1],
+                    "bio": bio[left:right + 1]
+                }
+        resolved = []
+        ans_indicator = []
+        for word_index in range(len(words)):
+            if word_index in substitutions:
+                resolved.extend(substitutions[word_index]['text'])
+                ans_indicator.extend(substitutions[word_index]['bio'])
             else:
-                bio = [1 if i in range(start_index, end_index+1) else 0 for i in range(len(words))]
-            for span_index, span in enumerate(cr['top_spans']):
-                # Pronouns have only one word
-                if span[1] == span[0] and cr['predicted_antecedents'][span_index] > -1:
-                    antecedent_span = cr['top_spans'][cr['predicted_antecedents'][span_index]]
-                    left = antecedent_span[0]
-                    right = antecedent_span[1]
-                    substitutions[span[0]] = {
-                        "text": words[left:right + 1],
-                        "bio": bio[left:right + 1]
-                    }
-            resolved = []
-            ans_indicator = []
-            for word_index in range(len(words)):
-                if word_index in substitutions:
-                    resolved.extend(substitutions[word_index]['text'])
-                    ans_indicator.extend(substitutions[word_index]['bio'])
-                else:
-                    resolved.append(words[word_index])
-                    ans_indicator.append(bio[word_index])
-            ans_indicators.append(ans_indicator)
-            cr_solved_words.append(resolved)
-        coreferences_list.append(cr_solved_words)
-    return coreferences_list, ans_indicators
+                resolved.append(words[word_index])
+                ans_indicator.append(bio[word_index])
+        ans_indicators.append(ans_indicator)
+        coreferences.append(resolved)
+    return coreferences, ans_indicators
 
 
 def merge_dps_and_crefs(data_path, dependencies_path, coreferences_path, result_path):
@@ -143,22 +137,22 @@ def generate_sg_dqg_datasets(dev_or_test="dev"):
     Path(sg_dqg_datasets_dir).mkdir(parents=False, exist_ok=True)
 
     preprocess_args = argparse.Namespace(
-        train_src=f"{SG_DQG_DIR}/datasets/text-data/train.src.txt",
-        train_tgt=f"{SG_DQG_DIR}/datasets/text-data/train.tgt.txt",
-        valid_src=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.src.txt",
-        valid_tgt=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.tgt.txt",
-        train_ans=f"{SG_DQG_DIR}/datasets/text-data/train.ans.txt",
-        valid_ans=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.ans.txt",
-        train_graph=f"{SG_DQG_DIR}/datasets/json-data/train.dp.tag.json",
-        valid_graph=f"{SG_DQG_SQUAD_DATA}/json-data/{dev_or_test}.dp.tag.json",
-        # train_src=f"{SG_DQG_SQUAD_DATA}/text-data/train.src.txt",
-        # train_tgt=f"{SG_DQG_SQUAD_DATA}/text-data/train.tgt.txt",
+        # train_src=f"{SG_DQG_DIR}/datasets/text-data/train.src.txt",
+        # train_tgt=f"{SG_DQG_DIR}/datasets/text-data/train.tgt.txt",
         # valid_src=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.src.txt",
         # valid_tgt=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.tgt.txt",
-        # train_ans=f"{SG_DQG_SQUAD_DATA}/text-data/train.ans.txt",
+        # train_ans=f"{SG_DQG_DIR}/datasets/text-data/train.ans.txt",
         # valid_ans=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.ans.txt",
-        # train_graph=f"{SG_DQG_SQUAD_DATA}/json-data/train.dp.tag.json",
+        # train_graph=f"{SG_DQG_DIR}/datasets/json-data/train.dp.tag.json",
         # valid_graph=f"{SG_DQG_SQUAD_DATA}/json-data/{dev_or_test}.dp.tag.json",
+        train_src=f"{SG_DQG_SQUAD_DATA}/text-data/train.src.txt",
+        train_tgt=f"{SG_DQG_SQUAD_DATA}/text-data/train.tgt.txt",
+        valid_src=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.src.txt",
+        valid_tgt=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.tgt.txt",
+        train_ans=f"{SG_DQG_SQUAD_DATA}/text-data/train.ans.txt",
+        valid_ans=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.ans.txt",
+        train_graph=f"{SG_DQG_SQUAD_DATA}/json-data/train.dp.tag.json",
+        valid_graph=f"{SG_DQG_SQUAD_DATA}/json-data/{dev_or_test}.dp.tag.json",
         node_features=True,
         copy=True,
         answer=True,
@@ -190,16 +184,17 @@ def preprocess(dataset_name, graph_type="dp"):
     if dataset_name == "squad":
         if graph_type == "dp":
             if True:
+                nlp = spacy.load("en_core_web_sm")
                 json_save_dir = f"{SG_DQG_SQUAD_DATA}/json-data"
                 text_data_save_dir = f"{SG_DQG_SQUAD_DATA}/text-data"
                 Path(json_save_dir).mkdir(parents=True, exist_ok=True)
                 Path(text_data_save_dir).mkdir(parents=False, exist_ok=True)
 
                 ds = {'train': SGDQGDataset(
-                    dataset_name=dataset_name, data_limit=5, mode='train'
+                    dataset_name=dataset_name, data_limit=-1, mode='train', spacy_pipeline=nlp
                 ).get_dataset()}
                 dev_data = SGDQGDataset(
-                    dataset_name=dataset_name, data_limit=None, mode='dev'
+                    dataset_name=dataset_name, data_limit=-1, mode='dev', spacy_pipeline=nlp
                 ).get_split(0.5)
                 ds['dev'] = dev_data[:3]
                 ds['test'] = dev_data[3:]
@@ -212,27 +207,28 @@ def preprocess(dataset_name, graph_type="dp"):
                     crefs_path = f"{json_save_dir}/{data_type}.coreferences.graph.json"
                     data_path = f"{json_save_dir}/{data_type}.data.json"
                     contexts, answers, questions = ds[data_type]
-                    evidences_list = list([{
-                        "index": [ind, [0, 1]],
-                        # Ind is the document index, [0,1] corresponds to the evidence span (I think)
-                        "text": context,
-                    }] for ind, context in enumerate(contexts))
 
                     coref_resolved_context_tokens, ans_indicators = coreference_resolution(
-                        evidences_list, answers
+                        contexts, answers
                     )
-                    cr_contexts = [[" ".join(context) for context in contexts] for contexts in
-                                   coref_resolved_context_tokens]
+                    cr_contexts = []
+                    corefs = []
+
+                    for context_tokens in coref_resolved_context_tokens:
+                        sentences = nlp(" ".join(context_tokens)).sents
+                        sentences = [s for s in sentences]
+                        cr_contexts.append([evidence.string.strip() for evidence in sentences])
+                        corefs.append([[token.text for token in evidence] for evidence in sentences])
 
                     dependencies = dependency_parsing(cr_contexts, ans_indicators)
                     json_dump(dependencies, deps_path)
-                    json_dump(coref_resolved_context_tokens, crefs_path)
+                    json_dump(corefs, crefs_path)
 
-                    sources = []
-                    for cr_evidences, evidences in zip(cr_contexts, evidences_list):
-                        for cr_evidence, evidence in zip(cr_evidences, evidences):
-                            evidence["text"] = cr_evidence
-                            sources.append(cr_evidence)
+                    evidences_list = list([{
+                        "index": [paragraph_ind, [ev_ind, ev_ind + 1]],
+                        # Ind is the document index, [0,1] corresponds to the evidence span (I think)
+                        "text": evidence,
+                    } for ev_ind, evidence in enumerate(context)] for paragraph_ind, context in enumerate(cr_contexts))
 
                     data = list({
                         "question": questions[i],
@@ -240,7 +236,7 @@ def preprocess(dataset_name, graph_type="dp"):
                         "evidence": evidences_list[i]
                     } for i in range(len(evidences_list)))
                     json_dump(data, data_path)
-                    save_txt_data(sources, f"{data_type}.src.txt")
+                    save_txt_data([" ".join(evidences) for evidences in cr_contexts], f"{data_type}.src.txt")
                     save_txt_data([d["question"] for d in data], f"{data_type}.tgt.txt")
                     save_txt_data([d["answer"] for d in data], f"{data_type}.ans.txt")
                     merged_result_path = f"{json_save_dir}/{data_type}.merged.json"
@@ -256,13 +252,82 @@ def preprocess(dataset_name, graph_type="dp"):
 
 
 def train(ds_name):
-    pass
+    if ds_name == "squad":
+        for training_mode in ("classify", "generate"):
+            checkpoint = '' if training_mode == "classify" else f"{SG_DQG_DIR}/models/hotpotqa/classifier_best.chkpt"
+            opt = argparse.Namespace(
+                sequence_data=f"{SG_DQG_SQUAD_DATA}/preprocessed-data/preprocessed_sequence_data.pt",
+                graph_data=f"{SG_DQG_SQUAD_DATA}/preprocessed-data/preprocessed_graph_data.pt",
+                train_dataset=f"{SG_DQG_SQUAD_DATA}/Datasets/train_dataset.pt",
+                valid_dataset=f"{SG_DQG_SQUAD_DATA}/Datasets/dev_dataset.pt",
+                checkpoint=checkpoint,
+                epoch=20,
+                batch_size=32,
+                eval_batch_size=16,
+                pre_trained_vocab=True,
+                training_mode=training_mode,
+                max_token_src_len=200,
+                max_token_tgt_len=50,
+                sparse=0,
+                copy=True,
+                coverage=True,
+                coverage_weight=0.4,
+                node_feature=True,
+                d_word_vec=300,
+                d_seq_enc_model=512,
+                d_graph_enc_model=256,
+                n_graph_enc_layer=3,
+                d_k=64,
+                brnn=True,
+                enc_rnn="gru",
+                d_dec_model=512,
+                n_dec_layer=1,
+                dec_rnn="gru",
+                maxout_pool_size=2,
+                n_warmup_steps=10000,
+                dropout=0.5,
+                attn_dropout=0.1,
+                gpus=[0],
+                cuda_seed=-1,
+                save_mode="best",
+                save_model=f"{SG_DQG_DIR}/models/squad/{training_mode}",
+                log_home=f"{SG_DQG_DIR}/logs",
+                logfile_train=f"{SG_DQG_DIR}/logs/train_{training_mode}",
+                logfile_dev=f"{SG_DQG_DIR}/logs/dev_{training_mode }",
+                translate_ppl=15,
+                curriculum=0,
+                extra_shuffle=True,
+                optim="adam",
+                learning_rate=0.0002,
+                learning_rate_decay=0.75,
+                valid_steps=500,
+                decay_steps=500,
+                start_decay_steps=5000,
+                decay_bad_cnt=5,
+                max_grad_norm=5,
+                max_weight_value=32,
+                seed=0,
+                pretrained='',
+                answer=True,
+                feature=False,
+                n_seq_enc_layer=1,
+                slf_attn=False,
+                d_feat_vec=32,
+                alpha=0.1,
+                layer_attn=False,
+                dec_feature=0,
+                input_feed=True,
+                proj_share_weight=False,
+                decay_method=''
+            )
+            run(opt)
+
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("action", default="translate", type=str, help='What to do (e.g. "translate")',
-                        choices=("translate", "preprocess"))
+                        choices=("translate", "preprocess", "train"))
     parser.add_argument("-ds", help="Which dataset to use for the specified action (e.g \"squad\").", type=str,
                         choices=("squad", "hotpot"), default="squad")
 
