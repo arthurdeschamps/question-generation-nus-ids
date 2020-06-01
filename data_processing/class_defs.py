@@ -52,6 +52,35 @@ class QAExample:
         self.answer = answer
 
 
+class QAsExample:
+
+    def __init__(self, question: Question, answers: List[Answer]):
+        super(QAsExample, self).__init__()
+        self.question = question
+        self.answers = answers
+
+
+class SquadMultiQAExample(JsonParsable):
+
+    def __init__(self, context: str, qas: List[QAsExample], *args, **kwargs):
+        super(SquadMultiQAExample, self).__init__(*args, **kwargs)
+        self.context = context
+        self.qas = qas
+
+    @staticmethod
+    def from_json(json):
+        squad_multi_examples = []
+        for paragraph in json['paragraphs']:
+            context = paragraph['context']
+            qas = []
+            for qa in paragraph['qas']:
+                answers = [Answer.from_json(answer) for answer in qa['answers']]
+                question = Question.from_json(qa)
+                qas.append(QAsExample(question, answers))
+            squad_multi_examples.append(SquadMultiQAExample(context, qas))
+        return squad_multi_examples
+
+
 class SquadExample(QAExample, JsonParsable):
 
     def __init__(self, context: str, *args, **kwargs):
@@ -59,7 +88,7 @@ class SquadExample(QAExample, JsonParsable):
         self.context = context
 
     @staticmethod
-    def from_json(json, break_up_paragraphs=True) -> List['SquadExample']:
+    def from_json(json) -> List['SquadExample']:
         squad_examples = []
         for paragraph in json['paragraphs']:
             sentences_bounds = SquadExample.get_sentences_bounds(paragraph['context'])
@@ -67,16 +96,13 @@ class SquadExample(QAExample, JsonParsable):
                 start_indices = set()
                 texts = set()
                 answers = qa['answers']
+                question = Question.from_json(qa)
                 for answer_json in answers:
                     answer = Answer.from_json(answer_json)
                     if answer.answer_start not in start_indices or answer.text not in texts:
                         start_indices.add(answer.answer_start)
                         texts.add(answer.text)
-                        question = Question.from_json(qa)
-                        if break_up_paragraphs:
-                            context = SquadExample.get_answer_context(answer, sentences_bounds)
-                        else:
-                            context = paragraph['context']
+                        context = SquadExample.get_answer_context(answer, sentences_bounds)
                         squad_examples.append(SquadExample(context, question, answer))
         return squad_examples
 

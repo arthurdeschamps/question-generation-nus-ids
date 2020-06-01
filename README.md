@@ -6,7 +6,7 @@
 ## Instructions for the NQG model (Seq2Seq)
 To run anything related to the NQG model, you'll want to use the script models/seq2seq.py.
 
-To pre-process SG DQG data, you'll need to run `python -m spacy download en_core_web_sm` prior to do anything.
+To pre-process SG DQG data, you'll need to run `python -m spacy download en_core_web_sm` prior to doing anything.
 ### Train
 **Command**: `seq2seq.py train`
 

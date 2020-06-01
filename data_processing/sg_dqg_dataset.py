@@ -2,6 +2,7 @@ import re
 from logging import warning
 
 from allennlp.predictors import Predictor
+from tqdm import tqdm
 
 from data_processing.dataset import Dataset
 from data_processing.parse import read_squad_dataset
@@ -36,23 +37,26 @@ class SGDQGDataset(Dataset):
             if is_context and len(tokens) <= 1:
                 raise ValueError("Sentence contains only 1 or no token.")
             result_sentence = " ".join(tokens).strip()
-            if result_sentence[-1] != ".":
-                result_sentence += " ."
             return result_sentence
 
         cleaned_ds = {"contexts": [], "answers": [], "questions": []}
-        for ex in self.ds:
+        for i, ex in tqdm(enumerate(self.ds)):
+            if "Madonna" not in ex.context and i > 1:
+                continue
             try:
                 cont_doc = get_doc(ex.context)
                 evidences = [get_sentence(evidence, is_context=True) for evidence in cont_doc.sents
                              if (evidence.end - evidence.start) > 1]
                 context = predictor.predict(document=" ".join(evidences))
-                question = get_sentence(get_doc(ex.question.question))
-                answer = get_sentence(get_doc(ex.answer.text))
 
-                cleaned_ds["contexts"].append(context)
-                cleaned_ds["answers"].append(answer)
-                cleaned_ds["questions"].append(question)
+                for qa in ex.qas:
+                    question_cleaned = get_sentence(get_doc(qa.question.question))
+                    for answer in qa.answers:
+                        answer_cleaned = get_sentence(get_doc(answer.text))
+
+                        cleaned_ds["contexts"].append(context)
+                        cleaned_ds["answers"].append(answer_cleaned)
+                        cleaned_ds["questions"].append(question_cleaned)
             except TypeError or ValueError or RuntimeError as e:
                 warning(e)
                 warning(ex.context)

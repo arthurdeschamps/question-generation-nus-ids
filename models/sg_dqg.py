@@ -76,13 +76,16 @@ def dependency_parsing(resolved_corefs, updated_bios):
 
             nodes = []
             for i in range(len(pred['words'])):
-                nodes.append({
-                    'head': pred['predicted_heads'][i] - 1,
-                    'pos': pred['pos'][i],
-                    'dep': pred['predicted_dependencies'][i],
-                    'word': pred['words'][i],
-                    'ans': updated_bios[paragraph_index][bio_index + i]
-                })
+                try:
+                    nodes.append({
+                        'head': pred['predicted_heads'][i] - 1,
+                        'pos': pred['pos'][i],
+                        'dep': pred['predicted_dependencies'][i],
+                        'word': pred['words'][i],
+                        'ans': updated_bios[paragraph_index][bio_index + i]
+                    })
+                except IndexError as e:
+                    print(e)
             bio_index += len(pred['words'])
             dp.append(nodes)
         dps.append(dp)
@@ -92,12 +95,13 @@ def dependency_parsing(resolved_corefs, updated_bios):
 def coreference_resolution(contexts, answers):
     ans_indicators = []
     coreferences = []
-    info("Performing coreference resolutions...")
+    info("Performing coreference resolution...")
     for i, (cr, answer) in tqdm(enumerate(zip(contexts, answers))):
         words = cr['document']
         substitutions = {}
         start_index, end_index = answer_span(words, answer.split(' '))
         if start_index is None or end_index is None:
+            warning("Answer not found in text")
             bio = [0 for _ in range(len(words))]
         else:
             bio = [1 if i in range(start_index, end_index+1) else 0 for i in range(len(words))]

@@ -11,7 +11,7 @@ from transformers import BertConfig
 
 from data_processing.utils import array_to_string
 from defs import PRETRAINED_MODELS_DIR, MEDQUAD_RAW_DIR
-from data_processing.class_defs import SquadExample, Question, Answer
+from data_processing.class_defs import SquadExample, Question, Answer, SquadMultiQAExample
 import os
 from data_processing.class_defs import QAExample
 
@@ -30,7 +30,11 @@ def read_squad_dataset(dataset_path: str, limit=-1, break_up_paragraphs=True):
     squad_examples = []
     logging.info("Read squad examples...")
     for i, examples in tqdm(enumerate(ds)):
-        squad_examples.extend(SquadExample.from_json(examples, break_up_paragraphs=break_up_paragraphs))
+        if break_up_paragraphs:
+            squad_example_class = SquadExample
+        else:
+            squad_example_class = SquadMultiQAExample
+        squad_examples.extend(squad_example_class.from_json(examples))
         if i == limit:
             break
     return squad_examples
