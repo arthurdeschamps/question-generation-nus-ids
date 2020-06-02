@@ -1,5 +1,6 @@
 import re
 from logging import warning
+from random import random
 
 from allennlp.predictors import Predictor
 from tqdm import tqdm
@@ -41,8 +42,6 @@ class SGDQGDataset(Dataset):
 
         cleaned_ds = {"contexts": [], "answers": [], "questions": []}
         for i, ex in tqdm(enumerate(self.ds)):
-            if "Madonna" not in ex.context and i > 1:
-                continue
             try:
                 cont_doc = get_doc(ex.context)
                 evidences = [get_sentence(evidence, is_context=True) for evidence in cont_doc.sents
@@ -52,10 +51,8 @@ class SGDQGDataset(Dataset):
                 for qa in ex.qas:
                     question_cleaned = get_sentence(get_doc(qa.question.question))
                     for answer in qa.answers:
-                        answer_cleaned = get_sentence(get_doc(answer.text))
-
                         cleaned_ds["contexts"].append(context)
-                        cleaned_ds["answers"].append(answer_cleaned)
+                        cleaned_ds["answers"].append(answer.text)
                         cleaned_ds["questions"].append(question_cleaned)
             except TypeError or ValueError or RuntimeError as e:
                 warning(e)

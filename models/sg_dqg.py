@@ -30,7 +30,7 @@ def json_load(x):
 
 
 def json_dump(d, p):
-    return json.dump(d, codecs.open(p, 'w', 'utf-8'), indent=2, ensure_ascii=False)
+    return json.dump(d, codecs.open(p, 'w', 'utf-8'), ensure_ascii=False)
 
 
 def translate(dataset_name):
@@ -67,6 +67,7 @@ def dependency_parsing(resolved_corefs, updated_bios):
     dps = []
     info("Performing dependency parsing...")
     for paragraph_index, evidences in tqdm(enumerate(resolved_corefs)):
+        paragraph_bio = updated_bios[paragraph_index]
         dp = []
         bio_index = 0
         for ev_index, evidence in enumerate(evidences):
@@ -77,15 +78,17 @@ def dependency_parsing(resolved_corefs, updated_bios):
             nodes = []
             for i in range(len(pred['words'])):
                 try:
-                    nodes.append({
-                        'head': pred['predicted_heads'][i] - 1,
-                        'pos': pred['pos'][i],
-                        'dep': pred['predicted_dependencies'][i],
-                        'word': pred['words'][i],
-                        'ans': updated_bios[paragraph_index][bio_index + i]
-                    })
-                except IndexError as e:
-                    print(e)
+                    bio = paragraph_bio[bio_index + i]
+                except IndexError:
+                    warning("Mismatch between bio data length and paragraph length")
+                    bio = 0
+                nodes.append({
+                    'head': pred['predicted_heads'][i] - 1,
+                    'pos': pred['pos'][i],
+                    'dep': pred['predicted_dependencies'][i],
+                    'word': pred['words'][i],
+                    'ans':  bio
+                })
             bio_index += len(pred['words'])
             dp.append(nodes)
         dps.append(dp)
@@ -101,7 +104,7 @@ def coreference_resolution(contexts, answers):
         substitutions = {}
         start_index, end_index = answer_span(words, answer.split(' '))
         if start_index is None or end_index is None:
-            warning("Answer not found in text")
+            warning(f"Answer not found in text: '{answer}'")
             bio = [0 for _ in range(len(words))]
         else:
             bio = [1 if i in range(start_index, end_index+1) else 0 for i in range(len(words))]
