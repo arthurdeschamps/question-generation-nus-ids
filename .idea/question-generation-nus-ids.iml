@@ -5,6 +5,10 @@
       <sourceFolder url="file://$MODULE_DIR$/models/SG-Deep-Question-Generation/build-semantic-graphs" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/models/SG-Deep-Question-Generation" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/models/SG-Deep-Question-Generation/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/models/NQG_ASs2s" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/models/NQG_ASs2s/data" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/models/NQG_ASs2s/submodule" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/models/NQG_ASs2s/qgevalcap" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/venv" />
     </content>
     <orderEntry type="jdk" jdkName="Remote Python 3.7.7 (sftp://arthur@172.27.142.165:22/home/arthur/anaconda3/envs/tensorflow_env/bin/python)" jdkType="Python SDK" />

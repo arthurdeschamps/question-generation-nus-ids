@@ -330,7 +330,6 @@ def train(ds_name):
             run(opt)
 
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("action", default="translate", type=str, help='What to do (e.g. "translate")',

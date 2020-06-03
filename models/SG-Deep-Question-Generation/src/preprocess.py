@@ -21,7 +21,7 @@ def load_vocab(filename):
         for i, line in enumerate(f):
             if i % 50000 == 0:
                 mem = psutil.virtual_memory()
-                if mem.percent > 50.0:
+                if mem.percent > 70.0:
                     break
             word, *embedding = line.strip().split(' ')
             vocab_dict[word] = [float(d) for d in embedding]
