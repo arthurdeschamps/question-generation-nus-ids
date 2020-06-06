@@ -205,3 +205,6 @@ trained
 models/pre_trained
 /*.sh
 /data/medqa_handmade_dataset/ds_raw.csv
+
+*api_key
+*.log*

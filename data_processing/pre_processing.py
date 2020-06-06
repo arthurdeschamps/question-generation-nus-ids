@@ -61,7 +61,7 @@ class NQGDataPreprocessor:
             ner_sequence = np.full(shape=len(passage), fill_value='O', dtype=object)
             i = 0
             for word in passage:
-                token_ner = word.parent.ner if len(word.parent.ner) == 1 else word.parent.ner[2:]
+                token_ner = word.parent._ner if len(word.parent._ner) == 1 else word.parent._ner[2:]
                 # Takes either the most recent NER tag or the ones used in the original NQG paper
                 ner_sequence[i] = token_ner if enhanced_ner else self._ner_mapping(token_ner)
                 i += 1
