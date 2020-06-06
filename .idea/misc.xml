@@ -3,7 +3,7 @@
   <component name="JavaScriptSettings">
     <option name="languageLevel" value="ES6" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Remote Python 3.7.7 (sftp://arthur@172.27.142.165:22/home/arthur/anaconda3/envs/tensorflow_env/bin/python)" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Remote Python 3.7.7 (sftp://arthurdeschamp@idsd-2.d2.comp.nus.edu.sg:5018/home/arthurdeschamp/anaconda3/envs/qg/bin/python3.7)" project-jdk-type="Python SDK" />
   <component name="PythonCompatibilityInspectionAdvertiser">
     <option name="version" value="3" />
   </component>

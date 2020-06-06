@@ -1,4 +1,16 @@
 # Question Generation Integrating Knowledge Basis
+## General Instructions
+Please run the following python code:
+
+```[python]
+import stanza
+stanza.download('en') 
+import nltk
+nltk.download('stopwords')
+```
+## Knowledge Graph API
+### Google Knowledge Graph
+Please store you api key in a file ".gkg_api_key" located at the root directory 
 ## Instructions for the NQG model (Seq2Seq)
 To run anything related to the NQG model, you'll want to use the script models/seq2seq.py.
 ### Train

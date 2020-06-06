@@ -40,3 +40,6 @@ PRETRAINED_MODELS_DIR = f"{ROOT_DIR}/models/pre_trained"
 
 LOGS_DIR = f"{TRAINED_MODELS_DIR}/logs"
 GRADIENT_DIR = f"{LOGS_DIR}/gradient_tape"
+
+GKG_API_KEY_FILEPATH=f"{ROOT_DIR}/.gkg_api_key"
+GKG_SERVICE_URL="https://kgsearch.googleapis.com/v1/entities:search"
