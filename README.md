@@ -7,6 +7,7 @@ import stanza
 stanza.download('en') 
 import nltk
 nltk.download('stopwords')
+nltk.download('wordnet')
 ```
 ## Knowledge Graph API
 ### Google Knowledge Graph
