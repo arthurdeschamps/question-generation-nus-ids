@@ -24,6 +24,9 @@ class KnowledgeGraph:
                 node_type = nx.get_node_attributes(self.graph, 'node_type')[n]
                 if KnowledgeGraph._is_relevant(n, relevant_to) and node_type == 'fact':
                     relevant_facts[node].append(n)
+
+            if len(relevant_facts[node]) == 0:
+                del relevant_facts[node]
         return relevant_facts
 
     def __str__(self):
@@ -34,7 +37,7 @@ class KnowledgeGraph:
         # We define a fact being relevant to a string if the fact's content has at least one non stop word in common
         # with the string to match against
         relevant_keywords = set(to.split(' ')) & set(fact.content.split(' ')) - KnowledgeGraph._stopwords
-        is_relevant = len(relevant_keywords) > 0
+        is_relevant = len(relevant_keywords) > 1
         return is_relevant
 
     @staticmethod
