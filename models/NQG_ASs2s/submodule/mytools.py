@@ -15,8 +15,7 @@ def embed_op(inputs, params, name='embedding'):
             embedding = tf.compat.v1.get_variable(
                 name,
                 [params['voca_size'], params['hidden_size']],
-                dtype=params['dtype'],
-
+                dtype=params['dtype']
             )
     else:
         glove = np.load(params['embedding'])
@@ -142,18 +141,23 @@ def bleu_score(labels, predictions,
     def _nltk_blue_score(labels, predictions):
 
         # slice after <eos>
-        predictions = predictions.numpy()
+        # predictions = predictions.numpy()
+        final_preds = []
         for i in range(len(predictions)):
             prediction = predictions[i]
             if 2 in prediction:  # 2: EOS
-                predictions[i] = prediction[:prediction.index(2) + 1]
+                eos_token_index = tf.where(prediction == 2)[0][-1]
+                # predictions[i] = prediction[:eos_token_index + 1]
+                final_preds.append(predictions[i][:eos_token_index+1].numpy())
+            else:
+                final_preds.append(predictions[i].numpy())
 
         labels = [
             [[w_id for w_id in label if w_id != 0]]  # 0: PAD
             for label in labels.numpy()]
         predictions = [
             [w_id for w_id in prediction]
-            for prediction in predictions]
+            for prediction in final_preds]
 
         return float(nltk.translate.bleu_score.corpus_bleu(labels, predictions))
 

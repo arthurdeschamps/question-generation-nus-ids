@@ -8,7 +8,7 @@ class HParams:
         self.dtype = tf.float32
         self.voca_size = 34004
         self.embedding_trainable = False
-        self.hidden_size = 800
+        self.hidden_size = 350 #800
         self.encoder_layer = 1
         self.decoder_layer = 1
         self.answer_layer = 1
@@ -24,7 +24,7 @@ class HParams:
         self.end_token = 2  # <EOS> index
 
         # Keyword-net related parameters
-        self.use_keyword = 2
+        self.use_keyword = 4
 
         # Attention related parameters
         self.attn = 'normed_bahdanau'
@@ -33,7 +33,7 @@ class HParams:
         self.if_wean = True
 
         # Training related parameters
-        self.batch_size = 64
+        self.batch_size = 128
         self.learning_rate = 0.001
         self.decay_step = None
         self.decay_rate = 0.5

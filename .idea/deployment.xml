@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="arthur@172.27.142.165:22" overwriteAll="false" createEmptyFolders="true">
+  <component name="PublishConfigData" autoUpload="Always" serverName="arthurdeschamp@idsd-2.d2.comp.nus.edu.sg:5018" overwriteAll="false" createEmptyFolders="true">
     <serverData>
       <paths name="arthur@172.27.142.165:22">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/arthurdeschamp/question-generation" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="arthurdeschamp@idsd-2.d2.comp.nus.edu.sg:5018">
         <serverdata>
           <mappings>
             <mapping deploy="/home/arthurdeschamp/question-generation" local="$PROJECT_DIR$" />

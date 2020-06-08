@@ -1,9 +1,12 @@
+import functools
+
 import numpy as np
 import tensorflow as tf
 import tensorflow_addons as tfa
 import sys
+from defs import ASS2S_DIR
 
-sys.path.append('submodule/')
+sys.path.append(ASS2S_DIR + '/submodule/')
 from mytools import *
 import rnn_wrapper as wrapper
 
@@ -75,7 +78,7 @@ def q_generation(features, labels, mode, params):
         if question is not None:
             embd_q = embed_op(question, params, name='embedding')
 
-        def _lstm_cell(size, go_backwards):
+        def _lstm(size, go_backwards):
             return tf.keras.layers.LSTM(
                 size,
                 go_backwards=go_backwards,
@@ -84,20 +87,30 @@ def q_generation(features, labels, mode, params):
                 return_state=True
             )
 
-        # Build encoder cell
-        def lstm_cell_enc(go_backwards: bool):
-            return _lstm_cell(hidden_size, go_backwards)
-
-        def lstm_cell_dec():
+        def lstm_cell(nb_hidden_units):
+            dropout = params['rnn_dropout'] if mode == tf.estimator.ModeKeys.TRAIN else 0
+            tf.print("Dropout rate: ", dropout)
             return tf.keras.layers.LSTMCell(
-                units=hidden_size * 2,
-                dropout=params['rnn_dropout'] if mode == tf.estimator.ModeKeys.TRAIN else 0
+                units=nb_hidden_units,
+                dropout=dropout
             )
 
-        encoder_cell_fw = lstm_cell_enc(False) if params['encoder_layer'] == 1 else tf.keras.layers.StackedRNNCells(
-            [lstm_cell_enc(False) for _ in range(params['encoder_layer'])])
-        encoder_cell_bw = lstm_cell_enc(True) if params['encoder_layer'] == 1 else tf.keras.layers.StackedRNNCells(
-            [lstm_cell_enc(True) for _ in range(params['encoder_layer'])])
+        # Build encoder cell
+        def lstm_enc(go_backwards: bool):
+            return _lstm(hidden_size, go_backwards)
+
+        def multi_layer_lstm_enc(go_backwards: bool, nb_layers: int):
+            _encoder = lstm_enc(go_backwards)
+            for _ in range(nb_layers) - 1:
+                _encoder = lstm_enc(go_backwards)(_encoder)
+            return _encoder
+
+        if params['encoder_layer'] == 1:
+            encoder_cell_fw = lstm_enc(False)
+            encoder_cell_bw = lstm_enc(True)
+        else:
+            encoder_cell_fw = multi_layer_lstm_enc(False, params['encoder_layer'])
+            encoder_cell_bw = multi_layer_lstm_enc(True, params['encoder_layer'])
 
         encoder_outputs, forward_h, forward_c, backward_h, backward_c = tf.keras.layers.Bidirectional(
             encoder_cell_fw,
@@ -121,14 +134,13 @@ def q_generation(features, labels, mode, params):
                 _encoder_state.append(partial_state)
             encoder_state = tuple(_encoder_state)
 
-        answer_cell_fw = lstm_cell_enc(go_backwards=False) \
-            if params['answer_layer'] == 1 else tf.compat.v1.nn.rnn_cell.MultiRNNCell(
-            [lstm_cell_enc(go_backwards=False) for _ in range(params['answer_layer'])]
-        )
-        answer_cell_bw = lstm_cell_enc(go_backwards=True) \
-            if params['answer_layer'] == 1 else tf.compat.v1.nn.rnn_cell.MultiRNNCell(
-            [lstm_cell_enc(go_backwards=True) for _ in range(params['answer_layer'])]
-        )
+        if params['answer_layer'] == 1:
+            answer_cell_fw = lstm_enc(go_backwards=False)
+            answer_cell_bw = lstm_enc(go_backwards=True)
+
+        else:
+            answer_cell_fw = multi_layer_lstm_enc(False, params['answer_layer'])
+            answer_cell_bw = multi_layer_lstm_enc(True, params['answer_layer'])
 
         with tf.compat.v1.variable_scope('answer_scope'):
             answer_outputs, answer_forward_c, answer_forward_h, answer_backward_c, answer_backward_h = \
@@ -141,7 +153,7 @@ def q_generation(features, labels, mode, params):
         if params['answer_layer'] == 1:
             answer_state_c = tf.concat([answer_forward_c, answer_backward_c], axis=1)
             answer_state_h = tf.concat([answer_forward_h, answer_backward_h], axis=1)
-            #answer_state = tf.compat.v1.nn.rnn_cell.LSTMStateTuple(c=answer_state_c, h=answer_state_h)
+            # answer_state = tf.compat.v1.nn.rnn_cell.LSTMStateTuple(c=answer_state_c, h=answer_state_h)
             answer_state = [answer_state_c, answer_state_h]
         else:
             # Warning: this won't work
@@ -178,9 +190,9 @@ def q_generation(features, labels, mode, params):
         attention_mechanism = _attention(params, attention_states, len_s)
 
         # Build decoder cell
-        decoder_cell = lstm_cell_dec() if params['decoder_layer'] == 1 \
+        decoder_cell = lstm_cell(2*hidden_size) if params['decoder_layer'] == 1 \
             else tf.compat.v1.nn.rnn_cell.MultiRNNCell(
-            [lstm_cell_dec() for _ in range(params['decoder_layer'])]
+            [lstm_cell(2*hidden_size) for _ in range(params['decoder_layer'])]
         )
 
         if params['use_keyword'] > 0:
@@ -190,10 +202,12 @@ def q_generation(features, labels, mode, params):
                     last_attention = attention[0::beam_width]
                 else:
                     last_attention = attention
-                last_attention = tf.expand_dims(last_attention, 2)
-                m = answer_outputs
-                p_s = tf.nn.softmax(tf.matmul(m, last_attention), name='p_s')
-                o_s = tf.reduce_sum(p_s * m, axis=1)
+                o_s = last_attention
+                h_a = answer_outputs
+                for _ in range(params['use_keyword']):
+                    o_s = tf.expand_dims(o_s, 2)
+                    p_s = tf.nn.softmax(tf.matmul(h_a, o_s), name='p_s')
+                    o_s = tf.reduce_sum(p_s * h_a, axis=1)
 
                 if mode == tf.estimator.ModeKeys.PREDICT and beam_width > 0:
                     o_s = tfa.seq2seq.tile_batch(o_s, beam_width)
@@ -205,7 +219,7 @@ def q_generation(features, labels, mode, params):
 
         decoder_cell = tfa.seq2seq.AttentionWrapper(
             decoder_cell, attention_mechanism,
-            attention_layer_size=2 * hidden_size,
+            attention_layer_size=2*hidden_size,
             cell_input_fn=cell_input_fn,
             initial_cell_state=None,
             name="attention_wrapper"
@@ -232,10 +246,9 @@ def q_generation(features, labels, mode, params):
                 embedding=embedding_q,
             )
         else:  # EVAL & TEST
-            start_token = params['start_token'] * tf.ones([batch_size], dtype=tf.int32)
-            sampler = tfa.seq2seq.GreedyEmbeddingSampler(
-                embedding_q, start_token, params['end_token']
-            )
+            start_tokens = params['start_token'] * tf.ones([batch_size], dtype=tf.int32)
+            sampler = tfa.seq2seq.GreedyEmbeddingSampler(emb_fn)
+            sampler.initialize(embd_q, start_tokens, params['end_token'])
 
         # Decoder
         if mode != tf.estimator.ModeKeys.PREDICT or beam_width == 0:
@@ -255,35 +268,46 @@ def q_generation(features, labels, mode, params):
             decoder = tfa.seq2seq.BeamSearchDecoder(
                 cell=decoder_cell,
                 embedding=embedding_q,
-                start_tokens=start_token,
+                start_tokens=start_tokens,
                 end_token=params['end_token'],
                 initial_state=initial_state,
                 beam_width=beam_width,
                 length_penalty_weight=length_penalty_weight)
 
         # Dynamic decoding
+        dynamic_decode = functools.partial(
+            tfa.seq2seq.dynamic_decode, decoder_init_input=embd_q
+        )
         if mode == tf.estimator.ModeKeys.TRAIN:
-            outputs, _, _ = tfa.seq2seq.dynamic_decode(
-                decoder, impute_finished=True, maximum_iterations=None,
-                decoder_init_kwargs={
+            outputs, _, _ = dynamic_decode(
+                decoder, impute_finished=True, maximum_iterations=None, decoder_init_kwargs={
                     "initial_state": initial_state,
                     "embedding": embedding_q
-                },
-                decoder_init_input=embd_q
+                }
             )
             logits_q = outputs.rnn_output
             softmax_q = tf.nn.softmax(logits_q)
             predictions_q = tf.argmax(softmax_q, axis=-1)
         elif mode == tf.estimator.ModeKeys.PREDICT and beam_width > 0:
-            outputs, _, _ = tfa.seq2seq.dynamic_decode(decoder, impute_finished=False,
-                                                              maximum_iterations=params['maxlen_q_test'])
+            outputs, _, _ = tfa.seq2seq.dynamic_decode(
+                decoder, impute_finished=False, maximum_iterations=params['maxlen_q_test'],
+                decoder_init_kwargs={
+                    "initial_state": initial_state,
+                }
+            )
             predictions_q = outputs.predicted_ids  # [batch, length, beam_width]
             predictions_q = tf.transpose(predictions_q, [0, 2, 1])  # [batch, beam_width, length]
             predictions_q = predictions_q[:, 0, :]  # [batch, length]
         else:
             max_iter = params['maxlen_q_test'] if mode == tf.estimator.ModeKeys.PREDICT else params['maxlen_q_dev']
-            outputs, _, _ = tfa.seq2seq.dynamic_decode(decoder, impute_finished=True,
-                                                              maximum_iterations=max_iter)
+            outputs, _, _ = dynamic_decode(
+                decoder, impute_finished=True, maximum_iterations=max_iter,
+                decoder_init_kwargs={
+                    "initial_state": initial_state,
+                    "start_tokens": start_tokens,
+                    "end_token": params["end_token"]
+                }
+            )
             logits_q = outputs.rnn_output
             softmax_q = tf.nn.softmax(logits_q)
             predictions_q = tf.argmax(softmax_q, axis=-1)

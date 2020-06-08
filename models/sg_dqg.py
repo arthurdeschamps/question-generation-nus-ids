@@ -8,7 +8,7 @@ from pathlib import Path
 import spacy
 from allennlp.predictors.predictor import Predictor
 import allennlp_models.coref  # Required
-import allennlp_models.syntax.biaffine_dependency_parser  # Required
+import allennlp_models.structured_prediction.models.biaffine_dependency_parser  # Required
 import numpy as np
 from tqdm import tqdm
 from data_processing.sg_dqg_dataset import SGDQGDataset
@@ -198,10 +198,10 @@ def preprocess(dataset_name, graph_type="dp"):
                 Path(text_data_save_dir).mkdir(parents=False, exist_ok=True)
 
                 ds = {'train': SGDQGDataset(
-                    dataset_name=dataset_name, data_limit=-1, mode='train', spacy_pipeline=nlp
+                    dataset_name=dataset_name, data_limit=10, mode='train', spacy_pipeline=nlp
                 ).get_dataset()}
                 dev_data = SGDQGDataset(
-                    dataset_name=dataset_name, data_limit=-1, mode='dev', spacy_pipeline=nlp
+                    dataset_name=dataset_name, data_limit=10, mode='dev', spacy_pipeline=nlp
                 ).get_split(0.5)
                 ds['dev'] = dev_data[:3]
                 ds['test'] = dev_data[3:]

@@ -208,3 +208,4 @@ models/pre_trained
 
 *api_key
 *.log*
+store_model

@@ -74,15 +74,6 @@ def main():
     train_question_length = np.load(FLAGS.train_question_length)
     train_answer_length = np.load(FLAGS.train_answer_length)
 
-    # Data shuffling for training data
-    permutation = np.random.permutation(len(train_sentence))
-    train_sentence = train_sentence[permutation]
-    train_question = train_question[permutation]
-    train_answer = train_answer[permutation]
-    train_sentence_length = train_sentence_length[permutation]
-    train_question_length = train_question_length[permutation]
-    train_answer_length = train_answer_length[permutation]
-
     def train_input_fn():
         return tf.data.Dataset.from_tensor_slices((
             {"s": train_sentence,
@@ -91,9 +82,9 @@ def main():
              'len_s': train_sentence_length,
              'len_q': train_question_length, 'len_a': train_answer_length
              }, train_sentence)) \
-            .batch(batch_size=model_params['batch_size']) \
+            .shuffle(buffer_size=len(train_sentence))\
             .repeat(FLAGS.num_epochs) \
-            .shuffle(buffer_size=len(train_sentence))
+            .batch(batch_size=model_params['batch_size'], drop_remainder=True)
 
     # Load evaluation data
     eval_sentence = np.load(FLAGS.eval_sentence)
@@ -104,21 +95,20 @@ def main():
     eval_answer_length = np.load(FLAGS.eval_answer_length)
 
     # Evaluation input function for estimator
-    eval_input_fn = tf.compat.v1.estimator.inputs.numpy_input_fn(
-        x={"s": eval_sentence, 'q': eval_question, 'a': eval_answer,
-           'len_s': eval_sentence_length, 'len_q': eval_question_length, 'len_a': eval_answer_length},
-        y=None,
-        batch_size=model_params['batch_size'],
-        num_epochs=1,
-        shuffle=False)
+    def eval_input_fn():
+        return tf.data.Dataset.from_tensor_slices((
+            {
+                "s": eval_sentence, 'q': eval_question, 'a': eval_answer,
+                'len_s': eval_sentence_length, 'len_q': eval_question_length, 'len_a': eval_answer_length
+            }, None))\
+            .batch(batch_size=model_params['batch_size'], drop_remainder=True)
 
     # train and evaluate
     if FLAGS.mode == 'train':
         # define experiment
-        try:
-            nn.train(train_input_fn)
-        except ValueError as e:
-            print(e)
+        train_spec = tf.estimator.TrainSpec(train_input_fn)
+        eval_spec = tf.estimator.EvalSpec(eval_input_fn)
+        tf.estimator.train_and_evaluate(nn, train_spec, eval_spec)
     elif FLAGS.mode == "eval":
         nn.evaluate(eval_input_fn)
 
@@ -130,13 +120,12 @@ def main():
         test_answer_length = np.load(FLAGS.test_answer_length)
 
         # prediction input function for estimator
-        pred_input_fn = tf.compat.v1.estimator.inputs.numpy_input_fn(
-            x={"s": test_sentence, 'a': test_answer,
-               'len_s': test_sentence_length, 'len_a': test_answer_length},
-            y=None,
-            batch_size=model_params['batch_size'],
-            num_epochs=1,
-            shuffle=False)
+        def pred_input_fn():
+            return tf.data.Dataset.from_tensor_slices((
+                {"s": test_sentence, 'a': test_answer,
+                   'len_s': test_sentence_length, 'len_a': test_answer_length},
+                None
+            )).batch(batch_size=model_params['batch_size'])
 
         # prediction
         predict_results = nn.predict(input_fn=pred_input_fn)

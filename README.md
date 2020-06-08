@@ -17,9 +17,10 @@ nltk.download('wordnet')
 ### Google Knowledge Graph
 Please store you api key in a file ".gkg_api_key" located at the root directory 
 ## Instructions for the NQG model (Seq2Seq)
+To pre-process SG DQG data, you'll need to run `python -m spacy download en_core_web_sm` prior to doing anything.
+
 To run anything related to the NQG model, you'll want to use the script models/seq2seq.py.
 
-To pre-process SG DQG data, you'll need to run `python -m spacy download en_core_web_sm` prior to doing anything.
 ### Train
 **Command**: `seq2seq.py train`
 
@@ -54,3 +55,6 @@ your trained model.
 
 `--model_path path` : path to a .pt trained model file.
 
+## Instructions for SG-DQG
+- Follow instructions 1 from: https://github.com/yanghoonkim/NQG_ASs2s
+- Have the GloVe embedding .txt file in /models/pretrained/ and run `models/NQG_ASs2s/data/process_embedding.py`
