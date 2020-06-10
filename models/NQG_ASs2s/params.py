@@ -8,7 +8,7 @@ class HParams:
         self.dtype = tf.float32
         self.voca_size = 34004
         self.embedding_trainable = False
-        self.hidden_size = 350 #800
+        self.hidden_size = 512
         self.encoder_layer = 1
         self.decoder_layer = 1
         self.answer_layer = 1
@@ -18,7 +18,7 @@ class HParams:
         self.maxlen_q_dev = 27
         self.maxlen_q_test = 27
 
-        self.rnn_dropout = 0.4
+        self.rnn_dropout = 0.5
 
         self.start_token = 1  # <GO> index
         self.end_token = 2  # <EOS> index

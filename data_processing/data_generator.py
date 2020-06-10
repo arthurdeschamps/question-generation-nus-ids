@@ -1,23 +1,73 @@
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import pandas as pd
 import nltk
 import stanza
 
+from data_processing.mpqg_dataset import MPQGDataset
 from data_processing.parse import read_medquad_raw_dataset
 from data_processing.utils import array_to_string
 from defs import NQG_MODEL_DIR, NQG_DATA_HOME, MEDQUAD_DIR, MEDQUAD_DEV, MEDQUAD_TRAIN, \
     MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_DIR, MEDQA_HANDMADE_RAW_DATASET_FILEPATH, HOTPOT_QA_DEV_JSON, \
-    HOTPOT_QA_DEV_TARGETS_PATH
+    HOTPOT_QA_DEV_TARGETS_PATH, ASS2S_PROCESSED_SQUAD_DIR, ASS2S_PROCESSED_MPQG_DATA
 from data_processing.nqg_dataset import NQGDataset
 from data_processing.pre_processing import NQGDataPreprocessor
 import numpy as np
 
 
-def generate_vocabulary_files(dataset_path, bio_path, vocab_size):
+def generate_ass2s_mpqg_features(ds_name):
+    # The provided dataset for ASs2s has the following format:
+    # 'textN': unused
+    # 'annotation1' corresponds to the features of the context
+    # 'annotation2' corresponds to the features of the question
+    # 'annotation3' corresponds to the features of the answer
+    # 'annotationN' has fields: 'raw_text', 'toks' (tokenized, cases remain untouched for answers and questions and
+    # are lower-cased for contexts), 'POSs': ununsed,
+    # 'positions': unused, 'NERs': tokens replaced with corresponding NER tag or O
+    if ds_name == "squad":
+        ds_train = MPQGDataset(mode="train")
+        ds_test = MPQGDataset(mode="dev")
 
+        c_dev, a_dev, q_dev, c_test, a_test, q_test = ds_test.get_split(0.5)
+
+        def _generate_features(contexts, answers, questions, ds_type):
+            features = []
+            for context, answer, question in zip(contexts, answers, questions):
+                def make_features(document, is_context=False):
+                    if is_context:
+                        tokens = " ".join([" ".join([token.text.lower() for token in sentence.tokens])
+                                           for sentence in document.sentences])
+                    else:
+                        tokens = document.text
+                    return {
+                        'toks': tokens,
+                        'NERs': [{
+                            "entity": entity.text.lower() if is_context else entity.text,
+                            "ent_type": entity.type
+                        } for entity in document.entities]
+                    }
+
+                features.append({
+                    'annotation1': make_features(context, is_context=True),
+                    'annotation2': question,
+                    'annotation3': answer
+                })
+            if not os.path.exists(ASS2S_PROCESSED_MPQG_DATA):
+                pathlib.Path(ASS2S_PROCESSED_MPQG_DATA).mkdir(parents=True, exist_ok=True)
+            with open(f"{ASS2S_PROCESSED_MPQG_DATA}/{ds_type}_sent_pre.json", mode='w', encoding='utf-8') as f:
+                json.dump(features, f, ensure_ascii=False, indent=2)
+
+        _generate_features(*ds_train.get_dataset(), "train")
+        _generate_features(c_dev, a_dev, q_dev, "dev")
+        _generate_features(c_test, a_test, q_test, "test")
+    else:
+        raise NotImplementedError(f"Preprocessing for dataset {ds_name} not implemented yet.")
+
+
+def generate_vocabulary_files(dataset_path, bio_path, vocab_size):
     collect_vocab = f"{NQG_MODEL_DIR}/code/NQG/seq2seq_pt/CollectVocab.py"
     python = "python3"
     subprocess.run([
@@ -92,7 +142,7 @@ def generate_nqg_features(mode: str, dataset_name: str, enhanced_ner: bool = Fal
         os.makedirs(data_dir, exist_ok=True)
 
         for data_name, content in (("source.txt", passages), ("target.txt", segment_data[2]), ("bio", bio),
-                                ("case", case), ("ner", ner), ("pos", pos)):
+                                   ("case", case), ("ner", ner), ("pos", pos)):
             if content is not None:
                 fname = f"{data_dir}/data.txt.{data_name}"
                 np.savetxt(fname, content, fmt="%s")
@@ -246,4 +296,3 @@ if __name__ == '__main__':
     else:
         raise ValueError("Non-existing dataset type")
     print("Done")
-

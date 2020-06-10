@@ -54,4 +54,4 @@ class Dataset(ABC):
             else:
                 raise ValueError()
         else:
-            raise NotImplementedError()
+            raise NotImplementedError(ds_name)

@@ -88,11 +88,9 @@ def q_generation(features, labels, mode, params):
             )
 
         def lstm_cell(nb_hidden_units):
-            dropout = params['rnn_dropout'] if mode == tf.estimator.ModeKeys.TRAIN else 0
-            tf.print("Dropout rate: ", dropout)
             return tf.keras.layers.LSTMCell(
                 units=nb_hidden_units,
-                dropout=dropout
+                dropout=params['rnn_dropout'] if mode == tf.estimator.ModeKeys.TRAIN else 0
             )
 
         # Build encoder cell
@@ -206,7 +204,7 @@ def q_generation(features, labels, mode, params):
                 h_a = answer_outputs
                 for _ in range(params['use_keyword']):
                     o_s = tf.expand_dims(o_s, 2)
-                    p_s = tf.nn.softmax(tf.matmul(h_a, o_s), name='p_s')
+                    p_s = tf.nn.softmax(tf.matmul(h_a, o_s))
                     o_s = tf.reduce_sum(p_s * h_a, axis=1)
 
                 if mode == tf.estimator.ModeKeys.PREDICT and beam_width > 0:
@@ -248,66 +246,66 @@ def q_generation(features, labels, mode, params):
         else:  # EVAL & TEST
             start_tokens = params['start_token'] * tf.ones([batch_size], dtype=tf.int32)
             sampler = tfa.seq2seq.GreedyEmbeddingSampler(emb_fn)
-            sampler.initialize(embd_q, start_tokens, params['end_token'])
+            sampler.initialize(embedding_q, start_tokens, params['end_token'])
 
         # Decoder
         if mode != tf.estimator.ModeKeys.PREDICT or beam_width == 0:
             initial_state = decoder_cell.zero_state(dtype=dtype, batch_size=batch_size)
-            if copy_state is not None:
-                initial_state = initial_state.clone(cell_state=copy_state)
             decoder = tfa.seq2seq.BasicDecoder(
                 cell=decoder_cell,
                 sampler=sampler,
                 output_layer=output_layer
             )
-
         else:
             initial_state = decoder_cell.zero_state(dtype=dtype, batch_size=batch_size * beam_width)
-            if copy_state is not None:
-                initial_state = initial_state.clone(cell_state=copy_state)
             decoder = tfa.seq2seq.BeamSearchDecoder(
                 cell=decoder_cell,
-                embedding=embedding_q,
-                start_tokens=start_tokens,
-                end_token=params['end_token'],
-                initial_state=initial_state,
                 beam_width=beam_width,
-                length_penalty_weight=length_penalty_weight)
+                length_penalty_weight=length_penalty_weight,
+                output_layer=output_layer
+            )
+
+        if copy_state is not None:
+            initial_state = initial_state.clone(cell_state=copy_state)
 
         # Dynamic decoding
         dynamic_decode = functools.partial(
-            tfa.seq2seq.dynamic_decode, decoder_init_input=embd_q
+            tfa.seq2seq.dynamic_decode, decoder_init_input=embd_q if question is not None else embedding_q
         )
-        if mode == tf.estimator.ModeKeys.TRAIN:
-            outputs, _, _ = dynamic_decode(
-                decoder, impute_finished=True, maximum_iterations=None, decoder_init_kwargs={
-                    "initial_state": initial_state,
-                    "embedding": embedding_q
-                }
-            )
-            logits_q = outputs.rnn_output
-            softmax_q = tf.nn.softmax(logits_q)
-            predictions_q = tf.argmax(softmax_q, axis=-1)
-        elif mode == tf.estimator.ModeKeys.PREDICT and beam_width > 0:
-            outputs, _, _ = tfa.seq2seq.dynamic_decode(
-                decoder, impute_finished=False, maximum_iterations=params['maxlen_q_test'],
-                decoder_init_kwargs={
-                    "initial_state": initial_state,
-                }
-            )
-            predictions_q = outputs.predicted_ids  # [batch, length, beam_width]
-            predictions_q = tf.transpose(predictions_q, [0, 2, 1])  # [batch, beam_width, length]
-            predictions_q = predictions_q[:, 0, :]  # [batch, length]
-        else:
-            max_iter = params['maxlen_q_test'] if mode == tf.estimator.ModeKeys.PREDICT else params['maxlen_q_dev']
-            outputs, _, _ = dynamic_decode(
-                decoder, impute_finished=True, maximum_iterations=max_iter,
+        if mode == tf.estimator.ModeKeys.PREDICT or mode == tf.estimator.ModeKeys.EVAL:
+            dynamic_decode = functools.partial(
+                dynamic_decode,
                 decoder_init_kwargs={
                     "initial_state": initial_state,
                     "start_tokens": start_tokens,
                     "end_token": params["end_token"]
                 }
             )
+        else:
+            dynamic_decode = functools.partial(
+                dynamic_decode,
+                impute_finished=True, maximum_iterations=None,
+                decoder_init_kwargs={
+                    "initial_state": initial_state,
+                    "embedding": embedding_q
+                }
+            )
+
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            outputs, _, _ = dynamic_decode(decoder)
+            logits_q = outputs.rnn_output
+            softmax_q = tf.nn.softmax(logits_q)
+            predictions_q = tf.argmax(softmax_q, axis=-1)
+        elif mode == tf.estimator.ModeKeys.PREDICT and beam_width > 0:
+            outputs, _, _ = dynamic_decode(
+                decoder, impute_finished=False, maximum_iterations=params['maxlen_q_test']
+            )
+            predictions_q = outputs.predicted_ids  # [batch, length, beam_width]
+            predictions_q = tf.transpose(predictions_q, [0, 2, 1])  # [batch, beam_width, length]
+            predictions_q = predictions_q[:, 0, :]  # [batch, length]
+        else:
+            max_iter = params['maxlen_q_test'] if mode == tf.estimator.ModeKeys.PREDICT else params['maxlen_q_dev']
+            outputs, _, _ = dynamic_decode(decoder, impute_finished=True, maximum_iterations=max_iter)
             logits_q = outputs.rnn_output
             softmax_q = tf.nn.softmax(logits_q)
             predictions_q = tf.argmax(softmax_q, axis=-1)
@@ -344,6 +342,8 @@ def q_generation(features, labels, mode, params):
         weight_q,  # [batch, length]
         average_across_timesteps=True,
         average_across_batch=True,
+        sum_over_batch=False,
+        sum_over_timesteps=False,
         softmax_loss_function=None  # default : sparse_softmax_cross_entropy
     )
 

@@ -11,16 +11,16 @@ FLAGS = None
 
 def remove_eos(sentence, eos='<EOS>', pad='<PAD>'):
     if eos in sentence:
-        return sentence[:sentence.index(eos)] + '\n'
+        return sentence[:sentence.index(eos)] + ['\n']
     elif pad in sentence:
-        return sentence[:sentence.index(pad)] + '\n'
+        return sentence[:sentence.index(pad)] + ['\n']
     else:
-        return sentence + '\n'
+        return sentence + ['\n']
 
 
 def write_result(predict_results, dic_path):
     print('Load dic file...')
-    with open(dic_path) as dic:
+    with open(dic_path, mode='rb') as dic:
         dic_file = pkl.load(dic)
     reversed_dic = dict((y, x) for x, y in dic_file.items())
 
@@ -33,9 +33,10 @@ def write_result(predict_results, dic_path):
                 if -1 in output:  # beam search
                     output = output[:output.index(-1)]
                 indices = [reversed_dic[index] for index in output]
-                sentence = ' '.join(indices)
-                sentence = remove_eos(sentence)
-                f.write(sentence.encode('utf-8'))
+                sentence = remove_eos(indices)
+                sentence = ' '.join(sentence)
+                f.write(sentence)
+                f.write(sentence)
 
             except StopIteration:
                 break
@@ -48,9 +49,7 @@ def main():
     # Config
     config = tf.estimator.RunConfig(
         model_dir=FLAGS.model_dir,
-        keep_checkpoint_max=3,
-        save_checkpoints_steps=100,
-
+        save_checkpoints_steps=500
     )
 
     # Load parameters
@@ -101,12 +100,16 @@ def main():
                 "s": eval_sentence, 'q': eval_question, 'a': eval_answer,
                 'len_s': eval_sentence_length, 'len_q': eval_question_length, 'len_a': eval_answer_length
             }, None))\
+            .shuffle(len(eval_sentence))\
             .batch(batch_size=model_params['batch_size'], drop_remainder=True)
 
     # train and evaluate
     if FLAGS.mode == 'train':
         # define experiment
-        train_spec = tf.estimator.TrainSpec(train_input_fn)
+        early_stopping = tf.estimator.experimental.stop_if_no_decrease_hook(
+            nn, 'loss', max_steps_without_decrease=5000, min_steps=1000, run_every_steps=5000, run_every_secs=None
+        )
+        train_spec = tf.estimator.TrainSpec(train_input_fn,) #hooks=[early_stopping])
         eval_spec = tf.estimator.EvalSpec(eval_input_fn)
         tf.estimator.train_and_evaluate(nn, train_spec, eval_spec)
     elif FLAGS.mode == "eval":

@@ -21,8 +21,10 @@ class NQGDataset(Dataset):
             self.nb_words = nb_words
             self.text = text
 
-    def __init__(self, break_up_paragraphs=True, *args, **kwargs):
-        super(NQGDataset, self).__init__(*args, **kwargs)
+    def __init__(self, break_up_paragraphs=True, *args, mode="train", **kwargs):
+        if mode not in ("train", "dev"):
+            raise ValueError("Mode should be either 'train' or 'dev'")
+        super(NQGDataset, self).__init__(*args, mode=mode, **kwargs)
         stanza.download('en')
         self.nlp = stanza.Pipeline('en', processors='tokenize,pos,ner')
         self.datatype = QAExample
