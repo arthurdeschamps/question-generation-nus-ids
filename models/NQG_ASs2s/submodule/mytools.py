@@ -7,6 +7,9 @@ import nltk
 import numpy as np
 import tensorflow as tf
 import nltk
+import pickle as pkl
+
+from defs import ASS2S_DIR
 
 
 def embed_op(inputs, params, name='embedding'):
@@ -135,31 +138,59 @@ def attention_bias_ignore_padding(memory_length, maxlen):
     return tf.expand_dims(tf.expand_dims(ret, 1), 1)
 
 
+def nltk_blue_score(labels, predictions):
+
+    # slice after <eos>
+    # predictions = predictions.numpy()
+    final_preds = []
+    for prediction in predictions:
+        prediction = prediction.numpy()
+        if 2 in prediction:  # 2: EOS
+            eos_token_index = tf.where(prediction == 2)[0][-1]
+            # predictions[i] = prediction[:eos_token_index + 1]
+            final_preds.append(prediction[:eos_token_index+1])
+        else:
+            final_preds.append(prediction)
+
+    labels = [
+        [[w_id for w_id in label if w_id != 0]]  # 0: PAD
+        for label in labels]
+    predictions = [
+        [w_id for w_id in prediction]
+        for prediction in final_preds]
+
+    return float(nltk.translate.bleu_score.corpus_bleu(labels, predictions))
+
+
 def bleu_score(labels, predictions,
                weights=None, metrics_collections=None,
                updates_collections=None, name=None):
-    def _nltk_blue_score(labels, predictions):
+    from main import remove_eos
 
-        # slice after <eos>
-        # predictions = predictions.numpy()
-        final_preds = []
-        for i in range(len(predictions)):
-            prediction = predictions[i]
-            if 2 in prediction:  # 2: EOS
-                eos_token_index = tf.where(prediction == 2)[0][-1]
-                # predictions[i] = prediction[:eos_token_index + 1]
-                final_preds.append(predictions[i][:eos_token_index+1].numpy())
-            else:
-                final_preds.append(predictions[i].numpy())
-
-        labels = [
-            [[w_id for w_id in label if w_id != 0]]  # 0: PAD
-            for label in labels.numpy()]
-        predictions = [
-            [w_id for w_id in prediction]
-            for prediction in final_preds]
-
-        return float(nltk.translate.bleu_score.corpus_bleu(labels, predictions))
-
-    score = tf.py_function(_nltk_blue_score, (labels, predictions), tf.float64)
+    score = tf.py_function(nltk_blue_score, (labels, predictions), tf.float64)
     return tf.compat.v1.metrics.mean(score * 100)
+
+
+class BLEUMetric(tf.keras.metrics.Metric):
+
+    def __init__(self, *args, **kwargs):
+        super(BLEUMetric, self).__init__(*args, **kwargs)
+        self.targets = None
+        self.candidates = None
+
+    def update_state(self, targets, candidates):
+        candidates = tf.argmax(tf.math.softmax(candidates), axis=-1)
+        if self.targets is None:
+            self.targets = targets
+            self.candidates = candidates
+        else:
+            self.targets = tf.concat((self.targets, targets), axis=1)
+            self.candidates = tf.concat((self.candidates, candidates), axis=1)
+
+    def result(self):
+        return 100 * tf.py_function(nltk_blue_score, (self.targets, self.candidates), tf.float64)
+
+    def reset_states(self):
+        self.targets = None
+        self.candidates = None
+

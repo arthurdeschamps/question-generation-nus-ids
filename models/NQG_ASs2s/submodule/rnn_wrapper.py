@@ -1,59 +1,55 @@
 import tensorflow as tf
-from tensorflow.compat.v1.nn.rnn_cell import RNNCell
 from tensorflow.python.framework import ops
+from tensorflow.python.keras.layers import Embedding
 from tensorflow.python.ops.rnn_cell_impl import assert_like_rnncell as _like_rnncell, LSTMStateTuple
 
 _Linear = tf.keras.layers.Dense  # rnn_cell_impl._Linear
 
 
-class WeanWrapper(RNNCell):
+class WeanWrapper(tf.keras.layers.RNN):
     '''
     Implementation of Word Embedding Attention Network(WEAN)
     '''
 
-    def __init__(self, cell, embedding, use_context=True):
-        super(WeanWrapper, self).__init__()
-        # if not _like_rnncell("parameter_cell", cell):
-        #     raise TypeError('The parameter cell is not RNNCell.')
+    def __init__(self, embedding_matrix: tf.Tensor, *args, use_context=True, **kwargs):
+        super(WeanWrapper, self).__init__(*args, **kwargs)
 
-        self._cell = cell
-        self._embedding = embedding
+        self._embedding_matrix = embedding_matrix
         self._use_context = use_context
-        self._linear = None
+        self._qW = tf.keras.layers.Dense(embedding_matrix.shape[1], name='qW')
+        self._qt = tf.keras.layers.Dense(embedding_matrix.shape[1], activation=tf.tanh, name='q_t')
 
     @property
     def state_size(self):
-        return self._cell.state_size
+        return self.cell.state_size
 
     @property
     def output_size(self):
-        return self._embedding.get_shape()[0]
+        return self._embedding_matrix.shape[0]
 
     def zero_state(self, batch_size, dtype):
         with ops.name_scope(type(self).__name__ + 'ZeroState', values=[batch_size]):
-            return self._cell.get_initial_state(batch_size=batch_size, dtype=dtype)
+            return self.cell.get_initial_state(batch_size=batch_size, dtype=dtype)
 
-    def __call__(self, inputs, state, training=False):
-        return self.call(inputs, state, training=training)
+    # def __call__(self, inputs, state, **kwargs):
+    #     return self.call(inputs, state)
 
-    def call(self, inputs, state=None, training=False):
-        assert state is not None
+    def call(self, inputs, initial_state=None, **kwargs):
         '''Run the cell and build WEAN over the output'''
-        output, res_state = self._cell(inputs, state)
+        output, res_state = self.cell(inputs, initial_state)
         context = res_state.attention
-        hidden_size = output.get_shape()[-1]
-        embedding_size = self._embedding.get_shape()[-1]
         if self._use_context:
-            query = tf.keras.layers.Dense(hidden_size, activation=tf.tanh, name='q_t')(tf.concat([output, context], -1))
+            query = self._qt(tf.concat([output, context], -1))
         else:
             query = output
 
-        qw = tf.keras.layers.Dense(embedding_size, name='qW')(query)
-        score = tf.matmul(qw, self._embedding, transpose_b=True, name='score')
+        qw = self._qW(query)
+        # Dirty hack: the first element of _embedding.weights is the embedding matrix itself
+        score = tf.matmul(qw, self._embedding_matrix, transpose_b=True, name='score')
         return score, res_state
 
 
-class CopyWrapper(RNNCell):
+class CopyWrapper(tf.keras.layers.RNN):
     ''' Implementation of Copy Mechanism
     '''
 

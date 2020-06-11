@@ -66,6 +66,11 @@ def preprocess(ds_name):
 
 def train(ds_name, model_name=None):
     os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+    import tensorflow as tf
+    gpus = tf.config.experimental.list_physical_devices(device_type='GPU')
+    print(gpus)
+    tf.config.experimental.set_visible_devices(devices=gpus[0], device_type='GPU')
+    tf.config.experimental.set_memory_growth(device=gpus[0], enable=True)
     if model_name is None:
         model_name = datetime.now().strftime('%m-%d-%Y_%H:%M:%S')
     model_dir = f"{ASS2S_DIR}/store_model/{model_name}"

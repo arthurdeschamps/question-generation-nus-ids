@@ -332,6 +332,7 @@ def train(ds_name):
 
 
 if __name__ == '__main__':
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     parser = argparse.ArgumentParser()
     parser.add_argument("action", default="translate", type=str, help='What to do (e.g. "translate")',
                         choices=("translate", "preprocess", "train"))

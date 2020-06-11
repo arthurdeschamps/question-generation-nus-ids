@@ -36,7 +36,7 @@ class HParams:
         self.batch_size = 128
         self.learning_rate = 0.001
         self.decay_step = None
-        self.decay_rate = 0.5
+        self.decay_rate = 0.4 #0.5
 
         # Beam Search
         self.beam_width = 10
