@@ -1,7 +1,6 @@
 import tensorflow as tf
 from tensorflow.python.framework import ops
-from tensorflow.python.keras.layers import Embedding
-from tensorflow.python.ops.rnn_cell_impl import assert_like_rnncell as _like_rnncell, LSTMStateTuple
+from tensorflow.python.ops.rnn_cell_impl import assert_like_rnncell as _like_rnncell
 
 _Linear = tf.keras.layers.Dense  # rnn_cell_impl._Linear
 

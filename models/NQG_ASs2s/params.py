@@ -18,7 +18,7 @@ class HParams:
         self.maxlen_q_dev = 27
         self.maxlen_q_test = 27
 
-        self.rnn_dropout = 0.5
+        self.rnn_dropout = 0.3
 
         self.start_token = 1  # <GO> index
         self.end_token = 2  # <EOS> index
@@ -36,7 +36,7 @@ class HParams:
         self.batch_size = 128
         self.learning_rate = 0.001
         self.decay_step = None
-        self.decay_rate = 0.4 #0.5
+        self.decay_rate = 0.5
 
         # Beam Search
         self.beam_width = 10

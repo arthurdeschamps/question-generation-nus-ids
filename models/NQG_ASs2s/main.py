@@ -7,7 +7,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_addons as tfa
 import params
-import model as model
+from model import ASs2s
 import mytools
 # Enable logging for tf.estimator
 tf.get_logger().setLevel("INFO")
@@ -33,15 +33,15 @@ def write_result(predict_results, dic_path):
     with open(FLAGS.pred_dir, 'w') as f:
         while True:
             try:
-                output = next(predict_results)
-                output = output['question'].tolist()
-                if -1 in output:  # beam search
-                    output = output[:output.index(-1)]
-                indices = [reversed_dic[index] for index in output]
-                sentence = remove_eos(indices)
-                sentence = ' '.join(sentence)
-                f.write(sentence)
-                f.write(sentence)
+                predictions = next(predict_results)
+                for output in predictions:
+                    output = output.numpy()
+                    if -1 in output:  # beam search
+                        output = output[:output.index(-1)]
+                    indices = [reversed_dic[index] for index in output]
+                    sentence = remove_eos(indices)
+                    sentence = ' '.join(sentence)
+                    f.write(sentence)
 
             except StopIteration:
                 break
@@ -64,7 +64,6 @@ def get_train_dataset(batch_size):
          'len_q': train_question_length, 'len_a': train_answer_length
          }, train_question)) \
         .shuffle(buffer_size=len(train_sentence)) \
-        .repeat(FLAGS.num_epochs) \
         .batch(batch_size=batch_size, drop_remainder=True)
 
 
@@ -87,7 +86,7 @@ def get_validation_dataset(batch_size):
         .batch(batch_size=batch_size, drop_remainder=True)
 
 
-def get_test_dataset(batch_size):
+def get_test_dataset(b_size):
     # Load test data
     test_sentence = np.load(FLAGS.test_sentence)
     test_answer = np.load(FLAGS.test_answer)
@@ -95,9 +94,9 @@ def get_test_dataset(batch_size):
     test_answer_length = np.load(FLAGS.test_answer_length)
 
     # prediction input function for estimator
-    return tf.data.Dataset.from_tensor_slices({"s": test_sentence, 'a': test_answer,
-                                               'len_s': test_sentence_length, 'len_a': test_answer_length}).batch(
-        batch_size=batch_size)
+    return tf.data.Dataset.from_tensor_slices(
+        {"s": test_sentence, 'a': test_answer, 'len_s': test_sentence_length, 'len_a': test_answer_length}
+    ).batch(batch_size=b_size)
 
 
 def get_params():
@@ -107,6 +106,13 @@ def get_params():
     # Add embedding path to model_params
     model_params['embedding'] = FLAGS.embedding
     return model_params
+
+
+def checkpoint(model: tf.keras.Model, model_acc: float, epoch):
+    filename = "weights.epoch_{:d}-bleu_{:.2f}.ckpt".format(epoch, model_acc)
+    filepath = f"{FLAGS.model_dir}/{filename}"
+    tf.print(f"Checkpoint filename: {filename}")
+    model.save_weights(filepath)
 
 
 def loss_function(batch_size, dtype, maxlen_q):
@@ -135,16 +141,18 @@ def loss_function(batch_size, dtype, maxlen_q):
 
 def main():
     model_params = get_params()
+    model = ASs2s(model_params)
+
     b_size = model_params['batch_size']
 
     config = {
         "show_loss_steps": 100,
-        "dev_steps": 500
+        "dev_steps": 500,
     }
 
+    best_acc_score = 0.0
+
     if FLAGS.mode == "train":
-        train_dataset = get_train_dataset(b_size)
-        valid_dataset = get_validation_dataset(b_size)
 
         # Optimizer
         learning_rate = model_params['learning_rate']
@@ -153,69 +161,82 @@ def main():
         # eval_metric for estimator
 
         ce_loss = loss_function(batch_size=b_size, dtype=model_params['dtype'], maxlen_q=model_params['maxlen_q_train'])
-        nn = model.ASs2s(model_params)
-
-        model_checkpoint = tf.keras.callbacks.ModelCheckpoint(
-            filepath=FLAGS.model_dir + "weights.{epoch:02d}-{bleu:.2f}.hdf5",
-            monitor='bleu',
-            verbose=1,
-            save_freq=300,
-            save_best_only=True
-        )
 
         @tf.function
         def train_step(features, labels):
             with tf.GradientTape() as tape:
-                candidate_logits = nn(features, training=True)
+                candidate_logits = model(features, training=True)
                 loss = ce_loss(feature['len_q'])(labels, candidate_logits)
 
-            grads = tape.gradient(loss, nn.trainable_weights)
-            optimizer.apply_gradients(zip(grads, nn.trainable_weights))
+            grads = tape.gradient(loss, model.trainable_weights)
+            optimizer.apply_gradients(zip(grads, model.trainable_weights))
             return loss
 
-        def dev_step():
-            references = []
-            candidates = []
-
-            @tf.function
-            def _make_pred(feature):
-                return nn(feature, training=False)
-
-            for features, labels in valid_dataset.take(10):
-                predictions = _make_pred(features)
-                candidates.extend(predictions)
-                references.extend(labels.numpy())
-
-            bleu_score = mytools.nltk_blue_score(references, candidates)
-            tf.print(bleu_score)
-
         t1 = datetime.now()
-        for step, (feature, label) in enumerate(train_dataset):
+        step = 0
+        for epoch in range(1, FLAGS.num_epochs+1):
 
-            if step % config['dev_steps'] == 0:
-                dev_step()
+            train_dataset = get_train_dataset(b_size)
+            valid_dataset = get_validation_dataset(b_size)
 
-            loss = train_step(feature, label)
-            if step % config['show_loss_steps'] == 0:
-                t2 = datetime.now()
-                tf.print("Step ", step, " - Loss ", loss, " - Elapsed time: ", (t2 - t1).total_seconds(), " seconds")
-                t1 = t2
+            def dev_step():
+                references = []
+                candidates = []
+
+                @tf.function
+                def _make_pred(feature):
+                    return model(feature, training=False)
+
+                for features, labels in valid_dataset:
+                    predictions = _make_pred(features)
+                    candidates.extend(predictions)
+                    references.extend(labels.numpy())
+
+                bleu_score = 100 * mytools.nltk_blue_score(references, candidates)
+                return bleu_score
+
+            for feature, label in train_dataset:
+                step += 1
+                if step % config['dev_steps'] == 0:
+                    acc = dev_step()
+                    tf.print("BLEU-4: ", acc)
+                    if acc > best_acc_score:
+                        tf.print("Saving model...")
+                        checkpoint(model, acc, epoch)
+                        best_acc_score = acc
+
+                loss = train_step(feature, label)
+                if step % config['show_loss_steps'] == 0:
+                    t2 = datetime.now()
+                    tf.print("Epoch ", epoch,
+                             " - Step ", step,
+                             " - Loss ", loss,
+                             " - Elapsed time: ", (t2 - t1).total_seconds(), " seconds")
+                    t1 = t2
 
     else:
-        nn = tf.keras.models.load_model(FLAGS.model_dir)
+        model.load_weights(FLAGS.model_dir)
         test_data = get_test_dataset(b_size)
 
         # prediction
-        predict_results = nn.predict(test_data)
+        @tf.function
+        def predict_results(features):
+            return model(features, training=False)
+        predictor = (predict_results(x) for x in test_data)
         # write result(question) into file
-        write_result(predict_results, FLAGS.dictionary)
+        write_result(predictor, FLAGS.dictionary)
         # print_result(predict_results)
 
 
 def run(opt):
     global FLAGS
     FLAGS = opt
+    if FLAGS.mode != "train":
+        # These 2 lines are at the moment required because of a bug in Tensorflow
+        physical_devices = tf.config.list_physical_devices('GPU')
+        tf.config.experimental.set_memory_growth(physical_devices[0], enable=True)
     main()
+    print("Done.")
 
 
 if __name__ == '__main__':
