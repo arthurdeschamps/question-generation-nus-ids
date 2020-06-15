@@ -1,7 +1,9 @@
 import argparse
+import json
 import pickle as pkl
 import time
 from datetime import datetime
+from logging import info
 
 import numpy as np
 import tensorflow as tf
@@ -16,32 +18,27 @@ FLAGS = None
 
 def remove_eos(sentence, eos='<EOS>', pad='<PAD>'):
     if eos in sentence:
-        return sentence[:sentence.index(eos)] + ['\n']
+        return sentence[:sentence.index(eos)]
     elif pad in sentence:
-        return sentence[:sentence.index(pad)] + ['\n']
+        return sentence[:sentence.index(pad)]
     else:
-        return sentence + ['\n']
+        return sentence
 
 
-def write_result(predict_results, dic_path):
-    print('Load dic file...')
-    with open(dic_path, mode='rb') as dic:
-        dic_file = pkl.load(dic)
-    reversed_dic = dict((y, x) for x, y in dic_file.items())
-
+def write_result(predictions, ner_mappings, reversed_dic):
     print('Writing into file...')
     with open(FLAGS.pred_dir, 'w') as f:
-        while True:
+        for output, ner_mapping in zip(predictions, ner_mappings):
             try:
-                predictions = next(predict_results)
-                for output in predictions:
-                    output = output.numpy()
-                    if -1 in output:  # beam search
-                        output = output[:output.index(-1)]
-                    indices = [reversed_dic[index] for index in output]
-                    sentence = remove_eos(indices)
-                    sentence = ' '.join(sentence)
-                    f.write(sentence)
+                output = output.numpy()
+                if -1 in output:  # beam search
+                    output = output[:output.index(-1)]
+                indices = [reversed_dic[index] for index in output]
+                sentence = remove_eos(indices)
+                sentence = ' '.join(sentence)
+                sentence = mytools.replace_unknown_tokens(sentence, ner_mapping)
+                sentence = mytools.remove_adjacent_duplicate_grams(sentence, n=4)
+                f.write(sentence + "\n")
 
             except StopIteration:
                 break
@@ -99,6 +96,20 @@ def get_test_dataset(b_size):
     ).batch(batch_size=b_size)
 
 
+def get_ner_mappings(mode):
+    if mode == "train":
+        filepath = FLAGS.train_ners
+    elif mode == "dev":
+        filepath = FLAGS.dev_ners
+    elif mode == "test":
+        filepath = FLAGS.test_ners
+    else:
+        raise ValueError(f"mode '{mode}' not recognized. Choices are: 'train', 'dev' or 'test'.")
+    with open(filepath) as ner_file:
+        ners = json.load(ner_file)
+    return ners
+
+
 def get_params(training):
     # Load parameters
     model_params = getattr(params, FLAGS.params)().values()
@@ -124,7 +135,7 @@ def loss_function(batch_size, dtype, maxlen_q):
             # Loss
             targets = tf.cast(targets, tf.int32, name="targets")
             labels = tf.concat([targets[:, 1:], tf.zeros([batch_size, 1], dtype=tf.int32)], axis=1, name='label_q')
-            weight_q = tf.sequence_mask(tf.squeeze(len_q), maxlen_q, dtype) * tf.cast(tf.not_equal(targets, 3), tf.float32)
+            weight_q = tf.sequence_mask(tf.squeeze(len_q), maxlen_q, dtype)
 
             return tfa.seq2seq.sequence_loss(
                 candidate_logits,
@@ -144,6 +155,11 @@ def loss_function(batch_size, dtype, maxlen_q):
 def main():
     model_params = get_params(training=FLAGS.mode == "train")
     model = ASs2s(model_params)
+
+    info('Loading dic file...')
+    with open(FLAGS.dictionary, mode='rb') as dic:
+        dic_file = pkl.load(dic)
+    reversed_dic = dict((y, x) for x, y in dic_file.items())
 
     b_size = model_params['batch_size']
 
@@ -219,14 +235,18 @@ def main():
     else:
         model.load_weights(FLAGS.model_dir)
         test_data = get_test_dataset(b_size)
+        test_ners = get_ner_mappings(mode="test")
 
         # prediction
         @tf.function
         def predict_results(features):
             return model(features, training=False)
-        predictor = (predict_results(x) for x in test_data)
+        predictions = []
+        for x in test_data:
+            predictions.extend(predict_results(x))
+        assert len(test_ners) == len(predictions)
         # write result(question) into file
-        write_result(predictor, FLAGS.dictionary)
+        write_result(predictions, test_ners, reversed_dic)
         # print_result(predict_results)
 
 

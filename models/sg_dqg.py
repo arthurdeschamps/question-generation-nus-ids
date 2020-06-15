@@ -3,7 +3,7 @@ import codecs
 import json
 import os
 import sys
-from logging import warning, info, debug
+import logging
 from pathlib import Path
 
 import spacy
@@ -14,7 +14,7 @@ import numpy as np
 from tqdm import tqdm
 from data_processing.sg_dqg_dataset import SGDQGDataset
 from data_processing.utils import answer_span
-from defs import SG_DQG_DIR, GLOVE_PATH, SG_DQG_SQUAD_DATA, SG_DQG_HOTPOT_PREDS_PATH
+from defs import SG_DQG_DIR, GLOVE_PATH, SG_DQG_SQUAD_DATA, SG_DQG_HOTPOT_PREDS_PATH, SG_DQG_SQUAD_DEBUG_DATA
 
 sys.path.append(f"{SG_DQG_DIR}/build-semantic-graphs")
 sys.path.append(f"{SG_DQG_DIR}/src")
@@ -31,7 +31,7 @@ def json_load(x):
 
 
 def json_dump(d, p):
-    return json.dump(d, codecs.open(p, 'w', 'utf-8'), ensure_ascii=False)
+    return json.dump(d, codecs.open(p, 'w', 'utf-8'), ensure_ascii=False, indent=None)
 
 
 def translate(dataset_name):
@@ -66,7 +66,7 @@ def dependency_parsing(resolved_corefs, updated_bios):
         cuda_device=0
     )
     dps = []
-    info("Performing dependency parsing...")
+    logging.info("Performing dependency parsing...")
     for paragraph_index, evidences in tqdm(enumerate(resolved_corefs)):
         paragraph_bio = updated_bios[paragraph_index]
         dp = []
@@ -81,7 +81,7 @@ def dependency_parsing(resolved_corefs, updated_bios):
                 try:
                     bio = paragraph_bio[bio_index + i]
                 except IndexError:
-                    warning("Mismatch between bio data length and paragraph length")
+                    logging.warning("Mismatch between bio data length and paragraph length")
                     bio = 0
                 nodes.append({
                     'head': pred['predicted_heads'][i] - 1,
@@ -99,13 +99,13 @@ def dependency_parsing(resolved_corefs, updated_bios):
 def coreference_resolution(contexts, answers):
     ans_indicators = []
     coreferences = []
-    info("Performing coreference resolution...")
+    logging.info("Performing coreference resolution...")
     for i, (cr, answer) in tqdm(enumerate(zip(contexts, answers))):
         words = cr['document']
         substitutions = {}
         start_index, end_index = answer_span(words, answer.split(' '))
         if start_index is None or end_index is None:
-            warning(f"Answer not found in text: '{answer}'")
+            logging.warning(f"Answer not found in text: '{answer}'")
             bio = [0 for _ in range(len(words))]
         else:
             bio = [1 if i in range(start_index, end_index+1) else 0 for i in range(len(words))]
@@ -138,29 +138,21 @@ def merge_dps_and_crefs(data_path, dependencies_path, coreferences_path, result_
     json_dump(data, result_path)
 
 
-def generate_sg_dqg_datasets(dev_or_test="dev"):
-    sg_dqg_preprocessed_dir = f"{SG_DQG_SQUAD_DATA}/preprocessed-data/"
-    sg_dqg_datasets_dir = f"{SG_DQG_SQUAD_DATA}/Datasets"
+def generate_sg_dqg_datasets(data_dir):
+    sg_dqg_preprocessed_dir = f"{data_dir}/preprocessed-data/"
+    sg_dqg_datasets_dir = f"{data_dir}/Datasets"
     Path(sg_dqg_preprocessed_dir).mkdir(parents=False, exist_ok=True)
     Path(sg_dqg_datasets_dir).mkdir(parents=False, exist_ok=True)
 
     preprocess_args = argparse.Namespace(
-        # train_src=f"{SG_DQG_DIR}/datasets/text-data/train.src.txt",
-        # train_tgt=f"{SG_DQG_DIR}/datasets/text-data/train.tgt.txt",
-        # valid_src=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.src.txt",
-        # valid_tgt=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.tgt.txt",
-        # train_ans=f"{SG_DQG_DIR}/datasets/text-data/train.ans.txt",
-        # valid_ans=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.ans.txt",
-        # train_graph=f"{SG_DQG_DIR}/datasets/json-data/train.dp.tag.json",
-        # valid_graph=f"{SG_DQG_SQUAD_DATA}/json-data/{dev_or_test}.dp.tag.json",
-        train_src=f"{SG_DQG_SQUAD_DATA}/text-data/train.src.txt",
-        train_tgt=f"{SG_DQG_SQUAD_DATA}/text-data/train.tgt.txt",
-        valid_src=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.src.txt",
-        valid_tgt=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.tgt.txt",
-        train_ans=f"{SG_DQG_SQUAD_DATA}/text-data/train.ans.txt",
-        valid_ans=f"{SG_DQG_SQUAD_DATA}/text-data/{dev_or_test}.ans.txt",
-        train_graph=f"{SG_DQG_SQUAD_DATA}/json-data/train.dp.tag.json",
-        valid_graph=f"{SG_DQG_SQUAD_DATA}/json-data/{dev_or_test}.dp.tag.json",
+        train_src=f"{data_dir}/text-data/train.src.txt",
+        train_tgt=f"{data_dir}/text-data/train.tgt.txt",
+        valid_src=f"{data_dir}/text-data/dev.src.txt",
+        valid_tgt=f"{data_dir}/text-data/dev.tgt.txt",
+        train_ans=f"{data_dir}/text-data/train.ans.txt",
+        valid_ans=f"{data_dir}/text-data/dev.ans.txt",
+        train_graph=f"{data_dir}/json-data/train.dp.tag.json",
+        valid_graph=f"{data_dir}/json-data/dev.dp.tag.json",
         node_features=True,
         copy=True,
         answer=True,
@@ -168,7 +160,7 @@ def generate_sg_dqg_datasets(dev_or_test="dev"):
         save_sequence_data=f"{sg_dqg_preprocessed_dir}/preprocessed_sequence_data.pt",
         save_graph_data=f"{sg_dqg_preprocessed_dir}/preprocessed_graph_data.pt",
         train_dataset=f"{sg_dqg_datasets_dir}/train_dataset.pt",
-        valid_dataset=f"{sg_dqg_datasets_dir}/{dev_or_test}_dataset.pt",
+        valid_dataset=f"{sg_dqg_datasets_dir}/dev_dataset.pt",
         src_seq_length=200,
         tgt_seq_length=50,
         src_vocab_size=50000,
@@ -189,70 +181,77 @@ def generate_sg_dqg_datasets(dev_or_test="dev"):
 
 
 def preprocess(dataset_name, graph_type="dp"):
-    if dataset_name == "squad":
+    if "squad" in dataset_name:
+        if not(dataset_name in ("squad", "squad_debug")):
+            raise ValueError(f"Dataset name \"{dataset_name}\" not recognized")
+        # Preprocess only a subset of the data
+        debug = dataset_name == "squad_debug"
         if graph_type == "dp":
-            if True:
-                nlp = spacy.load("en_core_web_sm")
-                json_save_dir = f"{SG_DQG_SQUAD_DATA}/json-data"
-                text_data_save_dir = f"{SG_DQG_SQUAD_DATA}/text-data"
-                Path(json_save_dir).mkdir(parents=True, exist_ok=True)
-                Path(text_data_save_dir).mkdir(parents=False, exist_ok=True)
+            if debug:
+                data_dir = SG_DQG_SQUAD_DEBUG_DATA
+                data_limit = 50
+            else:
+                data_dir = SG_DQG_SQUAD_DATA
+                data_limit = -1
+            nlp = spacy.load("en_core_web_sm")
+            json_save_dir = f"{data_dir}/json-data"
+            text_data_save_dir = f"{data_dir}/text-data"
+            Path(json_save_dir).mkdir(parents=True, exist_ok=True)
+            Path(text_data_save_dir).mkdir(parents=False, exist_ok=True)
 
-                ds = {'train': SGDQGDataset(
-                    dataset_name=dataset_name, data_limit=-1, mode='train', spacy_pipeline=nlp
-                ).get_dataset()}
-                dev_data = SGDQGDataset(
-                    dataset_name=dataset_name, data_limit=-1, mode='dev', spacy_pipeline=nlp
-                ).get_split(0.5)
-                ds['dev'] = dev_data[:3]
-                ds['test'] = dev_data[3:]
+            ds = {'train': SGDQGDataset(
+                dataset_name="squad", data_limit=data_limit, mode='train', spacy_pipeline=nlp
+            ).get_dataset()}
+            dev_data = SGDQGDataset(
+                dataset_name="squad", data_limit=data_limit, mode='dev', spacy_pipeline=nlp
+            ).get_split(0.5)
+            ds['dev'] = dev_data[:3]
+            ds['test'] = dev_data[3:]
 
-                def save_txt_data(d: np.ndarray, filename):
-                    np.savetxt(f"{text_data_save_dir}/{filename}", d, delimiter='\n', comments=None, fmt="%s")
+            def save_txt_data(d: np.ndarray, filename):
+                np.savetxt(f"{text_data_save_dir}/{filename}", d, delimiter='\n', comments=None, fmt="%s")
 
-                for data_type in ("train", "dev", "test"):
-                    deps_path = f"{json_save_dir}/{data_type}.dependencies.graph.json"
-                    crefs_path = f"{json_save_dir}/{data_type}.coreferences.graph.json"
-                    data_path = f"{json_save_dir}/{data_type}.data.json"
-                    contexts, answers, questions = ds[data_type]
+            for data_type in ("train", "dev", "test"):
+                deps_path = f"{json_save_dir}/{data_type}.dependencies.graph.json"
+                crefs_path = f"{json_save_dir}/{data_type}.coreferences.graph.json"
+                data_path = f"{json_save_dir}/{data_type}.data.json"
+                contexts, answers, questions = ds[data_type]
 
-                    coref_resolved_context_tokens, ans_indicators = coreference_resolution(
-                        contexts, answers
-                    )
-                    cr_contexts = []
-                    corefs = []
+                coref_resolved_context_tokens, ans_indicators = coreference_resolution(contexts, answers)
+                cr_contexts = []
+                corefs = []
 
-                    for context_tokens in coref_resolved_context_tokens:
-                        sentences = nlp(" ".join(context_tokens)).sents
-                        sentences = [s for s in sentences]
-                        cr_contexts.append([evidence.string.strip() for evidence in sentences])
-                        corefs.append([[token.text for token in evidence] for evidence in sentences])
+                for context_tokens in coref_resolved_context_tokens:
+                    sentences = nlp(" ".join(context_tokens)).sents
+                    sentences = [s for s in sentences]
+                    cr_contexts.append([evidence.string.strip() for evidence in sentences])
+                    corefs.append([[token.text for token in evidence] for evidence in sentences])
 
-                    dependencies = dependency_parsing(cr_contexts, ans_indicators)
-                    json_dump(dependencies, deps_path)
-                    json_dump(corefs, crefs_path)
+                dependencies = dependency_parsing(cr_contexts, ans_indicators)
+                json_dump(dependencies, deps_path)
+                json_dump(corefs, crefs_path)
 
-                    evidences_list = list([{
-                        "index": [paragraph_ind, [ev_ind, ev_ind + 1]],
-                        # Ind is the document index, [0,1] corresponds to the evidence span (I think)
-                        "text": evidence,
-                    } for ev_ind, evidence in enumerate(context)] for paragraph_ind, context in enumerate(cr_contexts))
+                evidences_list = list([{
+                    "index": [paragraph_ind, [ev_ind, ev_ind + 1]],
+                    # Ind is the document index, [0,1] corresponds to the evidence span (I think)
+                    "text": evidence,
+                } for ev_ind, evidence in enumerate(context)] for paragraph_ind, context in enumerate(cr_contexts))
 
-                    data = list({
-                        "question": questions[i],
-                        "answer": answers[i],
-                        "evidence": evidences_list[i]
-                    } for i in range(len(evidences_list)))
-                    json_dump(data, data_path)
-                    save_txt_data([" ".join(evidences) for evidences in cr_contexts], f"{data_type}.src.txt")
-                    save_txt_data([d["question"] for d in data], f"{data_type}.tgt.txt")
-                    save_txt_data([d["answer"] for d in data], f"{data_type}.ans.txt")
-                    merged_result_path = f"{json_save_dir}/{data_type}.merged.json"
-                    merge_dps_and_crefs(data_path, deps_path, crefs_path, merged_result_path)
-                    graph_result_path = f"{json_save_dir}/{data_type}.dp.tag.json"
-                    build_semantic_graph(merged_result_path, questions, graph_result_path)
+                data = list({
+                    "question": questions[i],
+                    "answer": answers[i],
+                    "evidence": evidences_list[i]
+                } for i in range(len(evidences_list)))
+                json_dump(data, data_path)
+                save_txt_data([" ".join(evidences) for evidences in cr_contexts], f"{data_type}.src.txt")
+                save_txt_data([d["question"] for d in data], f"{data_type}.tgt.txt")
+                save_txt_data([d["answer"] for d in data], f"{data_type}.ans.txt")
+                merged_result_path = f"{json_save_dir}/{data_type}.merged.json"
+                merge_dps_and_crefs(data_path, deps_path, crefs_path, merged_result_path)
+                graph_result_path = f"{json_save_dir}/{data_type}.dp.tag.json"
+                build_semantic_graph(merged_result_path, questions, graph_result_path)
 
-            generate_sg_dqg_datasets()
+            generate_sg_dqg_datasets(data_dir)
         else:
             raise NotImplementedError()
     else:
@@ -260,14 +259,17 @@ def preprocess(dataset_name, graph_type="dp"):
 
 
 def train(ds_name):
-    if ds_name == "squad":
+    debug = "debug" in ds_name
+    if ds_name == "squad" or ds_name == "squad_debug":
+        data_dir = SG_DQG_SQUAD_DEBUG_DATA if debug else SG_DQG_SQUAD_DATA
         for training_mode in ("classify", "generate"):
-            checkpoint = '' if training_mode == "classify" else f"{SG_DQG_DIR}/models/hotpotqa/classifier_best.chkpt"
+            logging.info(f"Starting training for \"{training_mode}\" task")
+            checkpoint = '' if training_mode == "classify" else f"{SG_DQG_DIR}/models/{ds_name}/classifier_best.chkpt"
             opt = argparse.Namespace(
-                sequence_data=f"{SG_DQG_SQUAD_DATA}/preprocessed-data/preprocessed_sequence_data.pt",
-                graph_data=f"{SG_DQG_SQUAD_DATA}/preprocessed-data/preprocessed_graph_data.pt",
-                train_dataset=f"{SG_DQG_SQUAD_DATA}/Datasets/train_dataset.pt",
-                valid_dataset=f"{SG_DQG_SQUAD_DATA}/Datasets/dev_dataset.pt",
+                sequence_data=f"{data_dir}/preprocessed-data/preprocessed_sequence_data.pt",
+                graph_data=f"{data_dir}/preprocessed-data/preprocessed_graph_data.pt",
+                train_dataset=f"{data_dir}/Datasets/train_dataset.pt",
+                valid_dataset=f"{data_dir}/Datasets/dev_dataset.pt",
                 checkpoint=checkpoint,
                 epoch=20,
                 batch_size=32,
@@ -295,10 +297,10 @@ def train(ds_name):
                 n_warmup_steps=10000,
                 dropout=0.5,
                 attn_dropout=0.1,
-                gpus=[0],
+                gpus=[0,1,2],
                 cuda_seed=-1,
                 save_mode="best",
-                save_model=f"{SG_DQG_DIR}/models/squad/{training_mode}",
+                save_model=f"{SG_DQG_DIR}/models/{ds_name}/{training_mode}",
                 log_home=f"{SG_DQG_DIR}/logs",
                 logfile_train=f"{SG_DQG_DIR}/logs/train_{training_mode}",
                 logfile_dev=f"{SG_DQG_DIR}/logs/dev_{training_mode }",
@@ -332,12 +334,13 @@ def train(ds_name):
 
 
 if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    logging.root.setLevel(logging.NOTSET)
+    os.environ["CUDA_VISIBLE_DEVICES"] = "8,9,10"
     parser = argparse.ArgumentParser()
     parser.add_argument("action", default="translate", type=str, help='What to do (e.g. "translate")',
                         choices=("translate", "preprocess", "train"))
     parser.add_argument("-ds", help="Which dataset to use for the specified action (e.g \"squad\").", type=str,
-                        choices=("squad", "hotpot"), default="squad")
+                        choices=("squad", "hotpot", "squad_debug"), default="squad")
 
     args = parser.parse_args()
     if args.action == "translate":

@@ -24,17 +24,20 @@ def opt(model_dir, data_dir, mode, pred_path = None):
             train_sentence_length=f'{data_dir}/train_length_sentence.npy',
             train_question_length=f'{data_dir}/train_length_question.npy',
             train_answer_length=f'{data_dir}/train_length_answer.npy',
+            train_ners=f"{data_dir}/filtered_txt/train_sentence_ner_map.json",
             eval_sentence=f'{data_dir}/dev_sentence.npy',
             eval_question=f'{data_dir}/dev_question.npy',
             eval_answer=f'{data_dir}/dev_answer.npy',
             eval_sentence_length=f'{data_dir}/dev_length_sentence.npy',
             eval_question_length=f'{data_dir}/dev_length_question.npy',
             eval_answer_length=f'{data_dir}/dev_length_answer.npy',
+            eval_ners=f"{data_dir}/filtered_txt/dev_sentence_ner_map.json",
             test_sentence=f'{data_dir}/test_sentence.npy',
             test_answer=f'{data_dir}/test_answer.npy',
             test_sentence_length=f'{data_dir}/test_length_sentence.npy',
             test_answer_length=f'{data_dir}/test_length_answer.npy',
             test_question=f'{data_dir}/test_question.npy',
+            test_ners=f"{data_dir}/filtered_txt/test_sentence_ner_map.json",
             embedding=f'{data_dir}/glove840b_vocab300.npy',
             dictionary=f'{data_dir}/vocab.dic',
             model_dir=model_dir,
@@ -55,7 +58,7 @@ def translate(ds_name, model_name, ass2s_data_dir):
 def preprocess(ds_name):
     if ds_name == "squad":
         data_dir = f"{ASS2S_PROCESSED_DIR}/squad"
-        # generate_ass2s_mpqg_features(ds_name)
+        generate_ass2s_mpqg_features(ds_name)
         process_mpqg_data(data_dir)
         process_embedding(data_dir)
     else:

@@ -23,7 +23,7 @@ def record_log(logfile, step, loss, ppl, accu, bleu='unk', bad_cnt=0, lr='unk'):
 
 class SupervisedTrainer(object):
 
-    def __init__(self, model, loss, optimizer, translator, logger, opt, 
+    def __init__(self, model, loss, optimizer, translator, opt,
                  training_data, validation_data, src_vocab, graph_feature_vocab):
         self.model = model
         self.loss = loss
@@ -32,7 +32,6 @@ class SupervisedTrainer(object):
             self.class_loss.cuda()
         self.optimizer = optimizer
         self.translator = translator
-        self.logger = logger
         self.opt = opt
 
         self.training_data = training_data
@@ -125,6 +124,7 @@ class SupervisedTrainer(object):
                 torch.save(checkpoint, model_name)
         elif self.opt.training_mode == 'classify' and better:
             model_name = self.opt.save_model + '_cls_' + str(round(eval_num * 100, 5)) + '_accuracy.chkpt'
+            logging.info(f"Saving {model_name}...")
             torch.save(checkpoint, model_name)
         elif better:
             model_name = self.opt.save_model + '_unf_' + str(round(eval_num, 5)) + '_KL.chkpt'
@@ -217,7 +217,7 @@ class SupervisedTrainer(object):
     def train_epoch(self, device, epoch):
         ''' Epoch operation in training phase'''
         if self.opt.extra_shuffle and epoch > self.opt.curriculum:
-            self.logger.info('Shuffling...')
+            logging.info('Shuffling...')
             self.training_data.shuffle()
 
         self.model.train()
@@ -337,8 +337,8 @@ class SupervisedTrainer(object):
                     if better:
                         self.best_accu = valid_results['classification']['correct']
                     valid_eval = valid_results['classification']['correct']
-                    self.logger.info('  +  Training accuracy: {accu:3.3f} %, loss: {loss:3.5f}'.format(accu=report_avg_accu, loss=report_avg_loss))
-                    self.logger.info('  +  Validation accuracy: {accu:3.3f} %, loss: {loss:3.5f}'.format(accu=valid_results['classification']['correct'] * 100, 
+                    logging.info('  +  Training accuracy: {accu:3.3f} %, loss: {loss:3.5f}'.format(accu=report_avg_accu, loss=report_avg_loss))
+                    logging.info('  +  Validation accuracy: {accu:3.3f} %, loss: {loss:3.5f}'.format(accu=valid_results['classification']['correct'] * 100,
                                                                                                       loss=valid_results['classification']['loss']))
                 if self.opt.training_mode != 'classify':
                     report_avg_loss = report_total_loss['generate'] / report_n_word_total
@@ -347,8 +347,8 @@ class SupervisedTrainer(object):
                     if self.opt.coverage:
                         report_avg_coverage = report_total_loss['coverage'] / sample_num
                         report_total_loss['coverage'] = 0
-                        self.logger.info('  +  Training coverage loss: {loss:2.5f}'.format(loss=report_avg_coverage))
-                        self.logger.info('  +  Validation coverage loss: {loss:2.5f}'.format(loss=valid_results['generation']['coverage']))
+                        logging.info('  +  Training coverage loss: {loss:2.5f}'.format(loss=report_avg_coverage))
+                        logging.info('  +  Validation coverage loss: {loss:2.5f}'.format(loss=valid_results['generation']['coverage']))
                     report_total_loss['generate'], report_total_loss['nll'] = 0, 0
                     report_n_word_correct, report_n_word_total = 0, 0
                     better = valid_results['generation']['perplexity'] < self.best_ppl
@@ -362,8 +362,8 @@ class SupervisedTrainer(object):
                     # if better:
                     #     self.best_kl = valid_results['unify']
                     # valid_eval = valid_results['unify']
-                    self.logger.info('  +  Training kl-div loss: {loss:2.5f}'.format(loss=report_avg_kldiv))
-                    self.logger.info('  +  Validation kl-div loss: {loss:2.5f}'.format(loss=valid_results['unify']))
+                    logging.info('  +  Training kl-div loss: {loss:2.5f}'.format(loss=report_avg_kldiv))
+                    logging.info('  +  Validation kl-div loss: {loss:2.5f}'.format(loss=valid_results['unify']))
                 sample_num = 0
                 
                 ### ========== update learning rate ========== ###
@@ -396,19 +396,19 @@ class SupervisedTrainer(object):
 
     def train(self, device):
         ''' Start training '''
-        self.logger.info(self.model)
+        logging.info(self.model)
 
         for epoch_i in range(self.opt.epoch):
-            self.logger.info('')
-            self.logger.info(' *  [ Epoch {0} ]:   '.format(epoch_i))
+            logging.info('')
+            logging.info(' *  [ Epoch {0} ]:   '.format(epoch_i))
             start = time.time()
             results = self.train_epoch(device, epoch_i + 1)
 
             if self.opt.training_mode == 'generate':
-                self.logger.info(' *  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %'.format(ppl=results[0], accu=results[1]))
+                logging.info(' *  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %'.format(ppl=results[0], accu=results[1]))
             elif self.opt.training_mode == 'classify':
-                self.logger.info(' *  - (Training)   accuracy: {accu: 3.3f} %'.format(accu=results))
+                logging.info(' *  - (Training)   accuracy: {accu: 3.3f} %'.format(accu=results))
             else:
-                self.logger.info(' *  - (Training)   loss: {loss: 2.5f}'.format(loss=results))
+                logging.info(' *  - (Training)   loss: {loss: 2.5f}'.format(loss=results))
             print('                ' + str(time.time() - start) + ' seconds for epoch ' + str(epoch_i))
         

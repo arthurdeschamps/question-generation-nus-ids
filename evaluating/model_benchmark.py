@@ -147,7 +147,7 @@ if __name__ == '__main__':
         if model == "ass2s_squad":
             candidates = np.array(pd.read_csv(ASS2S_SQUAD_PREDS_OUTPUT_PATH, header=None, sep='\n')).reshape((-1,))
             references = np.array(
-                pd.read_csv(f"{ASS2S_PROCESSED_SQUAD_DIR}/filtered_txt/test_question.txt", header=None, sep='\n')
+                pd.read_csv(f"{ASS2S_PROCESSED_SQUAD_DIR}/filtered_txt/test_question_origin.txt", header=None, sep='\n')
             ).reshape((-1, 1))
             assert candidates.shape[0] == references.shape[0]
 

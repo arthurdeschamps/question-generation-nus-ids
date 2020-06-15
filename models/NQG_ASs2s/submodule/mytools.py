@@ -171,26 +171,22 @@ def bleu_score(labels, predictions,
     return tf.compat.v1.metrics.mean(score * 100)
 
 
-class BLEUMetric(tf.keras.metrics.Metric):
+def replace_unknown_tokens(sentence, ner_mappings):
+    for ner_id, entity in ner_mappings.items():
+        sentence = sentence.replace(ner_id, entity)
+    return sentence
 
-    def __init__(self, *args, **kwargs):
-        super(BLEUMetric, self).__init__(*args, **kwargs)
-        self.targets = None
-        self.candidates = None
 
-    def update_state(self, targets, candidates):
-        candidates = tf.argmax(tf.math.softmax(candidates), axis=-1)
-        if self.targets is None:
-            self.targets = targets
-            self.candidates = candidates
-        else:
-            self.targets = tf.concat((self.targets, targets), axis=1)
-            self.candidates = tf.concat((self.candidates, candidates), axis=1)
+def remove_adjacent_duplicate_grams(sentence, n=4):
+    sentence = sentence.split()
 
-    def result(self):
-        return 100 * tf.py_function(nltk_blue_score, (self.targets, self.candidates), tf.float64)
-
-    def reset_states(self):
-        self.targets = None
-        self.candidates = None
-
+    def _helper(s, i):
+        for k in range(0, len(s)-i, 1):
+            s1 = " ".join(s[k:k+i])
+            s2 = " ".join(s[k+i:k+2*i])
+            if s1 == s2:
+                s = s[0:k+i] + s[k+2*i:]
+        if n == i:
+            return s
+        return _helper(s, i+1)
+    return " ".join(_helper(sentence, 1))
