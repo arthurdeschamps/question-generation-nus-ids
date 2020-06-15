@@ -26,6 +26,8 @@ class ASs2s(tf.keras.Model):
 
         self.embedding_matrix = None
         self.embedding_layer = self._build_embedding_layer()
+        self.masking_layer = tf.keras.layers.Lambda(lambda x: tf.sequence_mask(x))
+
         self.answer_encoder = Encoder(params['answer_layer'], self.hidden_size, self.rnn_dropout,
                                       name='answer_encoder', dtype=self.features_d_type)
         self.passage_encoder = Encoder(params['encoder_layer'], self.hidden_size, self.rnn_dropout,
@@ -55,9 +57,10 @@ class ASs2s(tf.keras.Model):
 
     def call(self, inputs, training=True, mask=None):
         features = inputs
-        sentence = features['s']  # [batch, length]
+        sentence = tf.cast(features['s'], tf.int32, name="sentence")  # [batch, length]
         len_s = tf.squeeze(features['len_s'], name="len_s")
-        answer = features['a']
+        answer = tf.cast(features['a'], tf.int32, name="answer")
+        len_a = tf.squeeze(features['len_a'], name="len_a")
 
         # batch_size should not be specified
         # if fixed, then the redundant eval_data will make error
@@ -65,7 +68,7 @@ class ASs2s(tf.keras.Model):
         batch_size = tf.shape(sentence)[0]
 
         if training:
-            question = features['q']
+            question = tf.cast(features['q'], tf.int32, name="question")
             q_shape = (self.batch_size, None)
             tf.ensure_shape(question, shape=q_shape)
             question.set_shape(shape=q_shape)
@@ -74,12 +77,15 @@ class ASs2s(tf.keras.Model):
             question = None
             len_q = None
 
-        embd_s = self.embedding_layer(sentence)
-        embd_a = self.embedding_layer(answer)
-        embd_q = self.embedding_layer(question) if question is not None else None
+        embd_s, mask_s = self.embedding_layer(sentence), self.masking_layer(len_s)
+        embd_a, mask_a = self.embedding_layer(answer), self.masking_layer(len_a)
+        if question is not None:
+            embd_q, mask_q = self.embedding_layer(question), self.masking_layer(len_q)
+        else:
+            embd_q, mask_q = None, None
 
-        answer_encoder_outputs, answer_encoder_state = self.answer_encoder(embd_a, training=training)
-        passage_encoder_outputs, passage_encoder_state = self.passage_encoder(embd_s, training=training)
+        answer_encoder_outputs, answer_encoder_state = self.answer_encoder(embd_a, training=training, mask=mask_a)
+        passage_encoder_outputs, passage_encoder_state = self.passage_encoder(embd_s, training=training, mask=mask_s)
 
         if self.params['dec_init_ans'] and self.params['decoder_layer'] == self.params['answer_layer']:
             copy_state = answer_encoder_state
@@ -99,12 +105,12 @@ class ASs2s(tf.keras.Model):
             sampler = self.scheduled_sampler
             sampler.initialize(
                 inputs=embd_q,
-                sequence_length=len_q,
+                mask=mask_q
             )
         else:  # EVAL & TEST
             start_tokens = self.params['start_token'] * tf.ones([batch_size], dtype=tf.int32)
             sampler = self.greedy_sampler
-            sampler.initialize(embd_q, start_tokens, self.params['end_token'])
+            sampler.initialize(None, start_tokens, self.params['end_token'])
 
         self.attention_mechanism.setup_memory(
             memory=passage_encoder_outputs,
@@ -125,7 +131,7 @@ class ASs2s(tf.keras.Model):
         if copy_state is not None:
             initial_state = initial_state.clone(cell_state=copy_state)
 
-        # Dynamic decoding
+        # Dynamic decoding TODO: not sure about the decoder_init_input argument
         dynamic_decode = functools.partial(
             tfa.seq2seq.dynamic_decode, decoder_init_input=embd_q, training=training
         )
@@ -220,7 +226,8 @@ class ASs2s(tf.keras.Model):
                 output_dim=self.hidden_size,
                 dtype=self.features_d_type,
                 trainable=self.params['embedding_trainable'],
-                name='embedding'
+                name='embedding',
+                mask_zero=True
             )
         else:
             self.embedding_matrix = tf.Variable(

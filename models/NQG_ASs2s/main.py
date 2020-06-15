@@ -99,9 +99,12 @@ def get_test_dataset(b_size):
     ).batch(batch_size=b_size)
 
 
-def get_params():
+def get_params(training):
     # Load parameters
     model_params = getattr(params, FLAGS.params)().values()
+
+    if training:
+        model_params['beam_width'] = 0
 
     # Add embedding path to model_params
     model_params['embedding'] = FLAGS.embedding
@@ -117,12 +120,11 @@ def checkpoint(model: tf.keras.Model, model_acc: float, epoch):
 
 def loss_function(batch_size, dtype, maxlen_q):
     def _with_question_length(len_q):
-        @tf.function
         def _loss(targets, candidate_logits):
             # Loss
             targets = tf.cast(targets, tf.int32, name="targets")
             labels = tf.concat([targets[:, 1:], tf.zeros([batch_size, 1], dtype=tf.int32)], axis=1, name='label_q')
-            weight_q = tf.sequence_mask(tf.squeeze(len_q), maxlen_q, dtype)
+            weight_q = tf.sequence_mask(tf.squeeze(len_q), maxlen_q, dtype) * tf.cast(tf.not_equal(targets, 3), tf.float32)
 
             return tfa.seq2seq.sequence_loss(
                 candidate_logits,
@@ -140,7 +142,7 @@ def loss_function(batch_size, dtype, maxlen_q):
 
 
 def main():
-    model_params = get_params()
+    model_params = get_params(training=FLAGS.mode == "train")
     model = ASs2s(model_params)
 
     b_size = model_params['batch_size']
@@ -153,6 +155,9 @@ def main():
     best_acc_score = 0.0
 
     if FLAGS.mode == "train":
+
+        train_dataset = get_train_dataset(b_size)
+        valid_dataset = get_validation_dataset(b_size)
 
         # Optimizer
         learning_rate = model_params['learning_rate']
@@ -175,9 +180,6 @@ def main():
         t1 = datetime.now()
         step = 0
         for epoch in range(1, FLAGS.num_epochs+1):
-
-            train_dataset = get_train_dataset(b_size)
-            valid_dataset = get_validation_dataset(b_size)
 
             def dev_step():
                 references = []
@@ -231,10 +233,9 @@ def main():
 def run(opt):
     global FLAGS
     FLAGS = opt
-    if FLAGS.mode != "train":
-        # These 2 lines are at the moment required because of a bug in Tensorflow
-        physical_devices = tf.config.list_physical_devices('GPU')
-        tf.config.experimental.set_memory_growth(physical_devices[0], enable=True)
+    # These 2 lines are at the moment required because of a bug in Tensorflow
+    physical_devices = tf.config.list_physical_devices('GPU')
+    tf.config.experimental.set_memory_growth(physical_devices[0], enable=True)
     main()
     print("Done.")
 

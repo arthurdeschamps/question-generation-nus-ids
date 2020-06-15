@@ -12,7 +12,7 @@ from data_processing.parse import read_medquad_raw_dataset
 from data_processing.utils import array_to_string
 from defs import NQG_MODEL_DIR, NQG_DATA_HOME, MEDQUAD_DIR, MEDQUAD_DEV, MEDQUAD_TRAIN, \
     MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_DIR, MEDQA_HANDMADE_RAW_DATASET_FILEPATH, HOTPOT_QA_DEV_JSON, \
-    HOTPOT_QA_DEV_TARGETS_PATH, ASS2S_PROCESSED_SQUAD_DIR, ASS2S_PROCESSED_MPQG_DATA
+    HOTPOT_QA_DEV_TARGETS_PATH, ASS2S_PROCESSED_SQUAD_DIR, ASS2S_PROCESSED_SQUAD_MPQG_DATA
 from data_processing.nqg_dataset import NQGDataset
 from data_processing.pre_processing import NQGDataPreprocessor
 import numpy as np
@@ -36,28 +36,25 @@ def generate_ass2s_mpqg_features(ds_name):
         def _generate_features(contexts, answers, questions, ds_type):
             features = []
             for context, answer, question in zip(contexts, answers, questions):
-                def make_features(document, is_context=False):
-                    if is_context:
-                        tokens = " ".join([" ".join([token.text.lower() for token in sentence.tokens])
-                                           for sentence in document.sentences])
-                    else:
-                        tokens = document.text
+                def make_features(document):
+                    tokens = " ".join([" ".join([token.text.lower() for token in sentence.tokens])
+                                       for sentence in document.sentences])
                     return {
                         'toks': tokens,
                         'NERs': [{
-                            "entity": entity.text.lower() if is_context else entity.text,
+                            "entity": entity.text.lower(),
                             "ent_type": entity.type
                         } for entity in document.entities]
                     }
 
                 features.append({
-                    'annotation1': make_features(context, is_context=True),
+                    'annotation1': make_features(context),
                     'annotation2': question,
                     'annotation3': answer
                 })
-            if not os.path.exists(ASS2S_PROCESSED_MPQG_DATA):
-                pathlib.Path(ASS2S_PROCESSED_MPQG_DATA).mkdir(parents=True, exist_ok=True)
-            with open(f"{ASS2S_PROCESSED_MPQG_DATA}/{ds_type}_sent_pre.json", mode='w', encoding='utf-8') as f:
+            if not os.path.exists(ASS2S_PROCESSED_SQUAD_MPQG_DATA):
+                pathlib.Path(ASS2S_PROCESSED_SQUAD_MPQG_DATA).mkdir(parents=True, exist_ok=True)
+            with open(f"{ASS2S_PROCESSED_SQUAD_MPQG_DATA}/{ds_type}_sent_pre.json", mode='w', encoding='utf-8') as f:
                 json.dump(features, f, ensure_ascii=False, indent=2)
 
         _generate_features(*ds_train.get_dataset(), "train")

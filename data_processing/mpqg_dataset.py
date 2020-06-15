@@ -10,6 +10,6 @@ class MPQGDataset(NQGDataset):
         questions = []
         for example in tqdm(self.ds[:self.data_limit]):
             contexts.append(self.nlp(example.context))
-            questions.append(self.nlp(example.question.question))
-            answers.append(self.nlp(example.answer.text))
+            questions.append(example.question.question)
+            answers.append(example.answer.text)
         return contexts, answers, questions

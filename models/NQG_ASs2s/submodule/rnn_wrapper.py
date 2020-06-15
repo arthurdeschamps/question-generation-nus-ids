@@ -35,7 +35,7 @@ class WeanWrapper(tf.keras.layers.RNN):
 
     def call(self, inputs, initial_state=None, **kwargs):
         '''Run the cell and build WEAN over the output'''
-        output, res_state = self.cell(inputs, initial_state)
+        output, res_state = self.cell(inputs, initial_state, **kwargs)
         context = res_state.attention
         if self._use_context:
             query = self._qt(tf.concat([output, context], -1))

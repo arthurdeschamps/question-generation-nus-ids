@@ -5,13 +5,13 @@ import sys
 from datetime import datetime
 
 from data_processing.data_generator import generate_ass2s_mpqg_features
-from defs import ASS2S_DIR, ASS2S_PROCESSED_SQUAD_DIR, ASS2S_PROCESSED_MPQG_DATA, ASS2S_SQUAD_PREDS_OUTPUT_PATH, \
-    ASS2S_PRED_DIR
+from defs import ASS2S_DIR, ASS2S_SQUAD_PREDS_OUTPUT_PATH, \
+    ASS2S_PRED_DIR, ASS2S_PROCESSED_DIR, ASS2S_PROCESSED_SQUAD_DIR
 
 sys.path.append(f"{ASS2S_DIR}/")
 from main import run
-
-ass2s_data_dir = f"{ASS2S_DIR}/data/processed/mpqg_substitute_a_vocab_include_a"
+from process_mpqg_data import run as process_mpqg_data
+from process_embedding import run as process_embedding
 
 
 def opt(model_dir, data_dir, mode, pred_path = None):
@@ -34,23 +34,18 @@ def opt(model_dir, data_dir, mode, pred_path = None):
             test_answer=f'{data_dir}/test_answer.npy',
             test_sentence_length=f'{data_dir}/test_length_sentence.npy',
             test_answer_length=f'{data_dir}/test_length_answer.npy',
+            test_question=f'{data_dir}/test_question.npy',
             embedding=f'{data_dir}/glove840b_vocab300.npy',
             dictionary=f'{data_dir}/vocab.dic',
             model_dir=model_dir,
             params="basic_params",
             pred_dir=pred_path,
-            num_epochs=15
+            num_epochs=20
         )
 
 
-def eval(ds_name, model_dir):
-    os.environ["CUDA_VISIBLE_DEVICES"] = "5"
-    model_dir = f"{ASS2S_DIR}/store_model/{model_dir}"
-    run(opt(model_dir, ass2s_data_dir, "eval"))
-
-
-def translate(ds_name, model_name):
-    os.environ["CUDA_VISIBLE_DEVICES"] = "4"
+def translate(ds_name, model_name, ass2s_data_dir):
+    os.environ["CUDA_VISIBLE_DEVICES"] = "8"
     pathlib.Path(ASS2S_PRED_DIR).mkdir(parents=True, exist_ok=True)
     if ds_name == "squad":
         model_dir = f"{ASS2S_DIR}/store_model/{model_name}"
@@ -59,13 +54,15 @@ def translate(ds_name, model_name):
 
 def preprocess(ds_name):
     if ds_name == "squad":
-        generate_ass2s_mpqg_features(ds_name)
+        data_dir = f"{ASS2S_PROCESSED_DIR}/squad"
+        # generate_ass2s_mpqg_features(ds_name)
+        process_mpqg_data(data_dir)
+        process_embedding(data_dir)
     else:
         raise NotImplementedError()
 
 
-def train(ds_name, model_name=None):
-    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+def train(ds_name, ass2s_data_dir, model_name=None):
     if model_name is None:
         model_name = datetime.now().strftime('%m-%d-%Y_%H:%M:%S')
     model_dir = f"{ASS2S_DIR}/store_model/{model_name}"
@@ -74,6 +71,7 @@ def train(ds_name, model_name=None):
 
 
 if __name__ == '__main__':
+    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("action", default="translate", type=str, help='What to do (e.g. "translate")',
@@ -84,11 +82,13 @@ if __name__ == '__main__':
                                        "evaluation", type=str, required=False)
 
     args = parser.parse_args()
+    if "squad" in args.ds:
+        data_dir = ASS2S_PROCESSED_SQUAD_DIR
+    else:
+        raise NotImplementedError()
     if args.action == "translate":
-        translate(args.ds, args.model)
-    elif args.action == "eval":
-        eval(args.ds, args.model)
+        translate(args.ds, args.model, data_dir)
     elif args.action == "preprocess":
         preprocess(args.ds)
     elif args.action == "train":
-        train(args.ds)
+        train(args.ds, data_dir)

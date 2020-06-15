@@ -7,7 +7,8 @@ import numpy as np
 from defs import NQG_MEDQUAD_DATASET, NQG_MEDQUAD_PREDS_OUTPUT_PATH, NQG_SQUAD_PREDS_OUTPUT_PATH, \
     NQG_SQUAD_GA_PREDS_OUTPUT_PATH, NQG_SQUAD_NA_PREDS_OUTPUT_PATH, NQG_SQUAD_NER_PREDS_OUTPUT_PATH, \
     NQG_SQUAD_DATASET, NQG_SQUAD_NER_DATASET, NQG_SQUAD_TESTGA_PREDS_OUTPUT_PATH, SG_DQG_HOTPOT_PREDS_PATH, \
-    HOTPOT_QA_DEV_TARGETS_PATH, ASS2S_SQUAD_PREDS_OUTPUT_PATH, ASS2S_PROVIDED_PROCESSED_DATA_DIR
+    HOTPOT_QA_DEV_TARGETS_PATH, ASS2S_SQUAD_PREDS_OUTPUT_PATH, ASS2S_PROVIDED_PROCESSED_DATA_DIR, \
+    ASS2S_PROCESSED_SQUAD_MPQG_DATA, ASS2S_PROCESSED_SQUAD_DIR
 
 
 def corpus_f1_score(corpus_candidates, corpus_references):
@@ -33,7 +34,7 @@ def benchmark(corpus_candidates: np.ndarray, corpus_references: np.ndarray):
     bleu_4 = 100 * bleu.corpus_bleu(corpus_references_split, corpus_candidates_split, weights=(0.25, 0.25, 0.25, 0.25))
     print(f"BLEU-4: {bleu_4}")
     # Sentences level ROUGE-L with beta = P_lcs / (R_lcs + 1e-12)
-    rouge_l_sentence_level = rouge_l(corpus_candidates_split, corpus_references_split)
+    rouge_l_sentence_level = 100 * rouge_l(corpus_candidates_split, corpus_references_split)
     print(f"ROUGE-L: {rouge_l_sentence_level}")
     meteor_score = 100 * np.mean(np.array([meteor(references, candidate)
                                      for (references, candidate) in zip(corpus_references, corpus_candidates)]))
@@ -146,7 +147,7 @@ if __name__ == '__main__':
         if model == "ass2s_squad":
             candidates = np.array(pd.read_csv(ASS2S_SQUAD_PREDS_OUTPUT_PATH, header=None, sep='\n')).reshape((-1,))
             references = np.array(
-                pd.read_csv(f"{ASS2S_PROVIDED_PROCESSED_DATA_DIR}/filtered_txt/test_question.txt", header=None, sep='\n')
+                pd.read_csv(f"{ASS2S_PROCESSED_SQUAD_DIR}/filtered_txt/test_question.txt", header=None, sep='\n')
             ).reshape((-1, 1))
             assert candidates.shape[0] == references.shape[0]
 
