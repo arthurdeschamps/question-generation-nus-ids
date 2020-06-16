@@ -92,7 +92,7 @@ class Translator(object):
             for i in range(len(tokens)):
                 if tokens[i] == s2s.Constants.UNK_WORD:
                     _, maxIndex = attn[i].max(0)
-                    tokens[i] = src[maxIndex[0]]
+                    tokens[i] = src[maxIndex]
         return tokens
 
     def translateBatch(self, srcBatch, bioBatch, featsBatch, tgtBatch):

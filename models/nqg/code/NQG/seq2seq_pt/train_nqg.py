@@ -19,42 +19,8 @@ from s2s.xinit import xavier_normal, xavier_uniform
 import os
 import xargs
 
-parser = argparse.ArgumentParser(description='train.py')
-xargs.add_data_options(parser)
-xargs.add_model_options(parser)
-xargs.add_train_options(parser)
 
-opt = parser.parse_args()
-
-logging.basicConfig(format='%(asctime)s [%(levelname)s:%(name)s]: %(message)s', level=logging.INFO)
-log_file_name = time.strftime("%Y%m%d-%H%M%S") + '.log.txt'
-if opt.log_home:
-    log_file_name = os.path.join(opt.log_home, log_file_name)
-file_handler = logging.FileHandler(log_file_name, encoding='utf-8')
-file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)-5.5s:%(name)s] %(message)s'))
-logging.root.addHandler(file_handler)
-logger = logging.getLogger(__name__)
-
-logger.info('My PID is {0}'.format(os.getpid()))
-logger.info('PyTorch version: {0}'.format(str(torch.__version__)))
-logger.info(opt)
-
-if torch.cuda.is_available() and not opt.gpus:
-    logger.info("WARNING: You have a CUDA device, so you should probably run with -gpus 0")
-
-if opt.seed > 0:
-    torch.manual_seed(opt.seed)
-
-if opt.gpus:
-    if opt.cuda_seed > 0:
-        torch.cuda.manual_seed(opt.cuda_seed)
-    cuda.set_device(opt.gpus[0])
-
-logger.info('My seed is {0}'.format(torch.initial_seed()))
-logger.info('My cuda seed is {0}'.format(torch.cuda.initial_seed()))
-
-
-def NMTCriterion(vocabSize):
+def NMTCriterion(vocabSize, opt):
     weight = torch.ones(vocabSize)
     weight[s2s.Constants.PAD] = 0
     crit = nn.NLLLoss(weight, size_average=False)
@@ -108,7 +74,7 @@ def addPair(f1, f2):
     yield (None, None)
 
 
-def load_dev_data(translator, src_file, bio_file, feat_files, tgt_file):
+def load_dev_data(translator, src_file, bio_file, feat_files, tgt_file, opt):
     dataset, raw = [], []
     srcF = open(src_file, encoding='utf-8')
     tgtF = open(tgt_file, encoding='utf-8')
@@ -152,7 +118,7 @@ evalModelCount = 0
 totalBatchCount = 0
 
 
-def evalModel(model, translator, evalData):
+def evalModel(model, translator, evalData, opt):
     global evalModelCount
     evalModelCount += 1
     ofn = 'dev.out.{0}'.format(evalModelCount)
@@ -199,13 +165,13 @@ def evalModel(model, translator, evalData):
     return report_metric
 
 
-def trainModel(model, translator, trainData, validData, dataset, optim):
+def trainModel(model, translator, trainData, validData, dataset, optim, opt, logger):
     logger.info(model)
     model.train()
     logger.warning("Set model to {0} mode".format('train' if model.decoder.dropout.training else 'eval'))
 
     # define criterion of each GPU
-    criterion = NMTCriterion(dataset['dicts']['tgt'].size())
+    criterion = NMTCriterion(dataset['dicts']['tgt'].size(), opt)
     copyLossF = nn.NLLLoss(size_average=False)
 
     start_time = time.time()
@@ -303,7 +269,7 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
                     and totalBatchCount >= opt.start_eval_batch:
                 model.eval()
                 logger.warning("Set model to {0} mode".format('train' if model.decoder.dropout.training else 'eval'))
-                valid_bleu = evalModel(model, translator, validData)
+                valid_bleu = evalModel(model, translator, validData, opt)
                 model.train()
                 logger.warning("Set model to {0} mode".format('train' if model.decoder.dropout.training else 'eval'))
                 model.decoder.attn.mask = None
@@ -326,7 +292,26 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
         saveModel()
 
 
-def main():
+def main(opt):
+    logger = logging
+    logger.info('My PID is {0}'.format(os.getpid()))
+    logger.info('PyTorch version: {0}'.format(str(torch.__version__)))
+    logger.info(opt)
+
+    if torch.cuda.is_available() and not opt.gpus:
+        logger.info("WARNING: You have a CUDA device, so you should probably run with -gpus 0")
+
+    if opt.seed > 0:
+        torch.manual_seed(opt.seed)
+
+    if opt.gpus:
+        if opt.cuda_seed > 0:
+            torch.cuda.manual_seed(opt.cuda_seed)
+        cuda.set_device(opt.gpus[0])
+
+    logger.info('My seed is {0}'.format(torch.initial_seed()))
+    logger.info('My cuda seed is {0}'.format(torch.cuda.initial_seed()))
+
     import onlinePreprocess
     onlinePreprocess.lower = opt.lower_input
     onlinePreprocess.seq_length = opt.max_sent_length
@@ -397,9 +382,17 @@ def main():
 
     validData = None
     if opt.dev_input_src and opt.dev_ref:
-        validData = load_dev_data(translator, opt.dev_input_src, opt.dev_bio, opt.dev_feats, opt.dev_ref)
-    trainModel(model, translator, trainData, validData, dataset, optim)
+        validData = load_dev_data(translator, opt.dev_input_src, opt.dev_bio, opt.dev_feats, opt.dev_ref, opt)
+    trainModel(model, translator, trainData, validData, dataset, optim, opt, logger)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description='train.py')
+    xargs.add_data_options(parser)
+    xargs.add_model_options(parser)
+    xargs.add_train_options(parser)
+
+    opt = parser.parse_args()
+
+
+    main(opt)

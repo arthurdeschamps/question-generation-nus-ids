@@ -9,6 +9,7 @@ from defs import NQG_MEDQUAD_DATASET, NQG_MEDQUAD_PREDS_OUTPUT_PATH, NQG_SQUAD_P
     NQG_SQUAD_DATASET, NQG_SQUAD_NER_DATASET, NQG_SQUAD_TESTGA_PREDS_OUTPUT_PATH, SG_DQG_HOTPOT_PREDS_PATH, \
     HOTPOT_QA_DEV_TARGETS_PATH, ASS2S_SQUAD_PREDS_OUTPUT_PATH, ASS2S_PROVIDED_PROCESSED_DATA_DIR, \
     ASS2S_PROCESSED_SQUAD_MPQG_DATA, ASS2S_PROCESSED_SQUAD_DIR
+from mytools import remove_adjacent_duplicate_grams
 
 
 def corpus_f1_score(corpus_candidates, corpus_references):
@@ -130,9 +131,11 @@ if __name__ == '__main__':
         _train_passages = pd.read_csv(f"{NQG_MEDQUAD_DATASET}/train/data.txt.source.txt", sep='\n', header=None)
         # loads predictions
         _preds = pd.read_csv(preds_path, header=None, sep='\n')
-        # Removes copy characters [[copied word]] -> copied word
         for i in _preds.index:
+            # Removes copy characters [[copied word]] -> copied word
             _preds.at[i, 0] = _preds.iloc[i, 0].replace("[[", "").replace("]]", "")
+            # Collate n-grams
+            _preds.at[i, 0] = remove_adjacent_duplicate_grams(_preds.iloc[i, 0])
         if check_trainset:
             candidates, references = prepare_for_eval(_preds, _targets, _test_passages, _train_passages)
         else:

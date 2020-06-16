@@ -181,11 +181,14 @@ def remove_adjacent_duplicate_grams(sentence, n=4):
     sentence = sentence.split()
 
     def _helper(s, i):
-        for k in range(0, len(s)-i, 1):
+        k = 0
+        while k < len(s)-i:
             s1 = " ".join(s[k:k+i])
             s2 = " ".join(s[k+i:k+2*i])
             if s1 == s2:
                 s = s[0:k+i] + s[k+2*i:]
+            else:
+                k += 1
         if n == i:
             return s
         return _helper(s, i+1)

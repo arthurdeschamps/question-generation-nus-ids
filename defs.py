@@ -49,8 +49,8 @@ PRETRAINED_MODELS_DIR = f"{MODELS_DIR}/pre_trained"
 LOGS_DIR = f"{TRAINED_MODELS_DIR}/logs"
 GRADIENT_DIR = f"{LOGS_DIR}/gradient_tape"
 
-GKG_API_KEY_FILEPATH=f"{ROOT_DIR}/.gkg_api_key"
-GKG_SERVICE_URL="https://kgsearch.googleapis.com/v1/entities:search"
+GKG_API_KEY_FILEPATH = f"{ROOT_DIR}/.gkg_api_key"
+GKG_SERVICE_URL = "https://kgsearch.googleapis.com/v1/entities:search"
 
 SG_DQG_DIR = f"{MODELS_DIR}/SG-Deep-Question-Generation"
 SG_DQG_DATA = f"{PROCESSED_DATA_DIR}/sg_dqg"
