@@ -57,7 +57,8 @@ SG_DQG_DATA = f"{PROCESSED_DATA_DIR}/sg_dqg"
 SG_DQG_SQUAD_DATA = f"{SG_DQG_DATA}/squad"
 SG_DQG_SQUAD_DEBUG_DATA = f"{SG_DQG_DATA}/squad_debug"
 
-SG_DQG_HOTPOT_PREDS_PATH = f"{RESULTS_DIR}/sg_dqg/prediction.txt"
+SG_DQG_HOTPOT_PREDS_PATH = f"{RESULTS_DIR}/sg_dqg/hotpot_preds.txt"
+SG_DQG_SQUAD_PREDS_PATH = f"{RESULTS_DIR}/sg_dqg/sg_dqg_squad_preds.txt"
 
 GLOVE_PATH = f"{PRETRAINED_MODELS_DIR}/glove.840B.300d.txt"
 

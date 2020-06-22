@@ -107,7 +107,7 @@ def generate_nqg_features(mode: str, dataset_name: str, enhanced_ner: bool = Fal
     """
     if mode not in ("train", "dev", "test"):
         raise ValueError(f"mode should be one of 'train', 'dev' or 'test'")
-    if dataset_name not in ("squad", "medquad", "medqa_handmade"):
+    if dataset_name not in ("squad", "medquad", "medqa_handmade", "hotpotqa"):
         raise ValueError("dataset_name argument not recognized")
 
     ds = NQGDataset(dataset_name=dataset_name, mode=mode)
@@ -290,6 +290,9 @@ if __name__ == '__main__':
         dev_json = HOTPOT_QA_DEV_JSON
         result_save_path = HOTPOT_QA_DEV_TARGETS_PATH
         generate_hotpot_targets(dev_json, result_save_path)
+    elif args.dataset_name == "nqg_hotpotqa":
+        generate_nqg_features('dev', 'hotpotqa')
+        generate_nqg_features('train', 'hotpotqa')
     else:
         raise ValueError("Non-existing dataset type")
     print("Done")

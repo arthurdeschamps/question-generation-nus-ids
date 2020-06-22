@@ -8,7 +8,7 @@ from defs import NQG_MEDQUAD_DATASET, NQG_MEDQUAD_PREDS_OUTPUT_PATH, NQG_SQUAD_P
     NQG_SQUAD_GA_PREDS_OUTPUT_PATH, NQG_SQUAD_NA_PREDS_OUTPUT_PATH, NQG_SQUAD_NER_PREDS_OUTPUT_PATH, \
     NQG_SQUAD_DATASET, NQG_SQUAD_NER_DATASET, NQG_SQUAD_TESTGA_PREDS_OUTPUT_PATH, SG_DQG_HOTPOT_PREDS_PATH, \
     HOTPOT_QA_DEV_TARGETS_PATH, ASS2S_SQUAD_PREDS_OUTPUT_PATH, ASS2S_PROVIDED_PROCESSED_DATA_DIR, \
-    ASS2S_PROCESSED_SQUAD_MPQG_DATA, ASS2S_PROCESSED_SQUAD_DIR
+    ASS2S_PROCESSED_SQUAD_MPQG_DATA, ASS2S_PROCESSED_SQUAD_DIR, SG_DQG_SQUAD_PREDS_PATH
 from mytools import remove_adjacent_duplicate_grams
 
 
@@ -69,10 +69,10 @@ def prepare_for_eval(preds: pd.DataFrame, targets: pd.DataFrame, test_passages: 
     return corpus_candidates, corpus_references
 
 
-def get_sg_dqg_hotpotqa_data():
+def get_sg_dqg_predictions(pred_path):
     preds = []
     refs = []
-    with open(SG_DQG_HOTPOT_PREDS_PATH) as f:
+    with open(pred_path) as f:
         for line in f:
             line = line.strip()
             if line.startswith("<gold>"):
@@ -86,7 +86,7 @@ if __name__ == '__main__':
 
     models = (
         "nqg_squad", "nqg_squad_ga", "nqg_squad_na", "nqg_squad_ner", "nqg_medquad", "nqg_squad_testga",
-        "sg_dqg_hotpotqa", "ass2s_squad"
+        "sg_dqg_hotpotqa", "ass2s_squad", "sg_dqg_squad"
     )
 
     import argparse
@@ -95,6 +95,7 @@ if __name__ == '__main__':
     parser.add_argument('model_name', type=str,
                         help=f"Name of the model to evaluate.",
                         choices=models)
+    parser.add_argument('--collate_ngrams', action='store_true', help='Removes n-gram duplicates.')
 
     args = parser.parse_args()
 
@@ -135,7 +136,8 @@ if __name__ == '__main__':
             # Removes copy characters [[copied word]] -> copied word
             _preds.at[i, 0] = _preds.iloc[i, 0].replace("[[", "").replace("]]", "")
             # Collate n-grams
-            _preds.at[i, 0] = remove_adjacent_duplicate_grams(_preds.iloc[i, 0])
+            if args.collate_ngrams:
+                _preds.at[i, 0] = remove_adjacent_duplicate_grams(_preds.iloc[i, 0])
         if check_trainset:
             candidates, references = prepare_for_eval(_preds, _targets, _test_passages, _train_passages)
         else:
@@ -144,7 +146,9 @@ if __name__ == '__main__':
 
     elif "sg_dqg" in model:
         if model == "sg_dqg_hotpotqa":
-            candidates, references = get_sg_dqg_hotpotqa_data()
+            candidates, references = get_sg_dqg_predictions(SG_DQG_HOTPOT_PREDS_PATH)
+        elif model == "sg_dqg_squad":
+            candidates, references = get_sg_dqg_predictions(SG_DQG_SQUAD_PREDS_PATH)
 
     elif "ass2s" in model:
         if model == "ass2s_squad":

@@ -14,7 +14,8 @@ import numpy as np
 from tqdm import tqdm
 from data_processing.sg_dqg_dataset import SGDQGDataset
 from data_processing.utils import answer_span
-from defs import SG_DQG_DIR, GLOVE_PATH, SG_DQG_SQUAD_DATA, SG_DQG_HOTPOT_PREDS_PATH, SG_DQG_SQUAD_DEBUG_DATA
+from defs import SG_DQG_DIR, GLOVE_PATH, SG_DQG_SQUAD_DATA, SG_DQG_HOTPOT_PREDS_PATH, SG_DQG_SQUAD_DEBUG_DATA, \
+    SG_DQG_SQUAD_PREDS_PATH
 
 sys.path.append(f"{SG_DQG_DIR}/build-semantic-graphs")
 sys.path.append(f"{SG_DQG_DIR}/src")
@@ -39,22 +40,28 @@ def translate(dataset_name):
         sequence_data_path = f"{SG_DQG_DIR}/datasets/preprocessed-data/preprocessed_sequence_data.pt"
         graph_data_path = f"{SG_DQG_DIR}/datasets/preprocessed-data/preprocessed_graph_data.pt"
         valid_data_path = f"{SG_DQG_DIR}/datasets/Datasets/valid_dataset.pt"
+        model = f"{SG_DQG_DIR}/models/hotpotqa/generator_best.chkpt"
+        output_path = SG_DQG_HOTPOT_PREDS_PATH
     elif dataset_name == "squad":
         sequence_data_path = f"{SG_DQG_SQUAD_DATA}/preprocessed-data/preprocessed_sequence_data.pt"
         graph_data_path = f"{SG_DQG_SQUAD_DATA}/preprocessed-data/preprocessed_graph_data.pt"
         valid_data_path = f"{SG_DQG_SQUAD_DATA}/Datasets/dev_dataset.pt"
+        model = f"{SG_DQG_DIR}/models/squad/generate.chkpt"
+        output_path = SG_DQG_SQUAD_PREDS_PATH
     else:
         raise ValueError(f"Unrecognized dataset name: \"{dataset_name}\"")
     translate_args = argparse.Namespace(
-        model=f"{SG_DQG_DIR}/models/hotpotqa/generator_best.chkpt",
+        model=model,
         sequence_data=sequence_data_path,
         graph_data=graph_data_path,
         valid_data=valid_data_path,
-        output=SG_DQG_HOTPOT_PREDS_PATH,
+        output=output_path,
         beam_size=5,
         batch_size=16,
-        gpus=[0],
-        cuda=True
+        eval_batch_size=16,
+        gpus=[1],
+        cuda=True,
+        n_best=1
     )
 
     sg_dqg_translate(translate_args)
@@ -258,94 +265,109 @@ def preprocess(dataset_name, graph_type="dp"):
         raise NotImplementedError()
 
 
-def train(ds_name):
+def train(ds_name, training_mode, checkpoint):
     debug = "debug" in ds_name
     if ds_name == "squad" or ds_name == "squad_debug":
         data_dir = SG_DQG_SQUAD_DEBUG_DATA if debug else SG_DQG_SQUAD_DATA
-        for training_mode in ("classify", "generate"):
-            logging.info(f"Starting training for \"{training_mode}\" task")
-            checkpoint = '' if training_mode == "classify" else f"{SG_DQG_DIR}/models/{ds_name}/classifier_best.chkpt"
-            opt = argparse.Namespace(
-                sequence_data=f"{data_dir}/preprocessed-data/preprocessed_sequence_data.pt",
-                graph_data=f"{data_dir}/preprocessed-data/preprocessed_graph_data.pt",
-                train_dataset=f"{data_dir}/Datasets/train_dataset.pt",
-                valid_dataset=f"{data_dir}/Datasets/dev_dataset.pt",
-                checkpoint=checkpoint,
-                epoch=20,
-                batch_size=32,
-                eval_batch_size=16,
-                pre_trained_vocab=True,
-                training_mode=training_mode,
-                max_token_src_len=200,
-                max_token_tgt_len=50,
-                sparse=0,
-                copy=True,
-                coverage=True,
-                coverage_weight=0.4,
-                node_feature=True,
-                d_word_vec=300,
-                d_seq_enc_model=512,
-                d_graph_enc_model=256,
-                n_graph_enc_layer=3,
-                d_k=64,
-                brnn=True,
-                enc_rnn="gru",
-                d_dec_model=512,
-                n_dec_layer=1,
-                dec_rnn="gru",
-                maxout_pool_size=2,
-                n_warmup_steps=10000,
-                dropout=0.5,
-                attn_dropout=0.1,
-                gpus=[0,1,2],
-                cuda_seed=-1,
-                save_mode="best",
-                save_model=f"{SG_DQG_DIR}/models/{ds_name}/{training_mode}",
-                log_home=f"{SG_DQG_DIR}/logs",
-                logfile_train=f"{SG_DQG_DIR}/logs/train_{training_mode}",
-                logfile_dev=f"{SG_DQG_DIR}/logs/dev_{training_mode }",
-                translate_ppl=15,
-                curriculum=0,
-                extra_shuffle=True,
-                optim="adam",
-                learning_rate=0.0002,
-                learning_rate_decay=0.75,
-                valid_steps=500,
-                decay_steps=500,
-                start_decay_steps=5000,
-                decay_bad_cnt=5,
-                max_grad_norm=5,
-                max_weight_value=32,
-                seed=0,
-                pretrained='',
-                answer=True,
-                feature=False,
-                n_seq_enc_layer=1,
-                slf_attn=False,
-                d_feat_vec=32,
-                alpha=0.1,
-                layer_attn=False,
-                dec_feature=0,
-                input_feed=True,
-                proj_share_weight=False,
-                decay_method=''
-            )
-            run(opt)
+        save_dir = f"{SG_DQG_DIR}/models/{ds_name}"
+        Path(save_dir).mkdir(parents=False, exist_ok=True)
+        logging.info(f"Starting training for \"{training_mode}\" task")
+        checkpoint_dir = '' if training_mode == "classify" else f"{save_dir}/{checkpoint}"
+
+        opt = argparse.Namespace(
+            sequence_data=f"{data_dir}/preprocessed-data/preprocessed_sequence_data.pt",
+            graph_data=f"{data_dir}/preprocessed-data/preprocessed_graph_data.pt",
+            train_dataset=f"{data_dir}/Datasets/train_dataset.pt",
+            valid_dataset=f"{data_dir}/Datasets/dev_dataset.pt",
+            checkpoint=checkpoint_dir,
+            epoch=20,
+            batch_size=32,
+            eval_batch_size=16,
+            pre_trained_vocab=True,
+            training_mode=training_mode,
+            max_token_src_len=200,
+            max_token_tgt_len=50,
+            sparse=0,
+            copy=True,
+            coverage=True,
+            coverage_weight=0.4,
+            node_feature=True,
+            d_word_vec=300,
+            d_seq_enc_model=512,
+            d_graph_enc_model=256,
+            n_graph_enc_layer=3,
+            d_k=64,
+            brnn=True,
+            enc_rnn="gru",
+            d_dec_model=512,
+            n_dec_layer=1,
+            dec_rnn="gru",
+            maxout_pool_size=2,
+            n_warmup_steps=10000,
+            dropout=0.5,
+            attn_dropout=0.1,
+            gpus=[1],
+            cuda_seed=-1,
+            save_mode="best",
+            save_model=f"{SG_DQG_DIR}/models/{ds_name}/{training_mode}",
+            log_home=f"{SG_DQG_DIR}/logs",
+            logfile_train=f"{SG_DQG_DIR}/logs/train_{training_mode}",
+            logfile_dev=f"{SG_DQG_DIR}/logs/dev_{training_mode }",
+            translate_ppl=15,
+            curriculum=0,
+            extra_shuffle=True,
+            optim="adam",
+            learning_rate=0.00025,
+            learning_rate_decay=0.75,
+            valid_steps=2000,
+            decay_steps=500,
+            start_decay_steps=5000,
+            decay_bad_cnt=5,
+            max_grad_norm=5,
+            max_weight_value=32,
+            seed=0,
+            pretrained='',
+            answer=True,
+            feature=False,
+            n_seq_enc_layer=1,
+            slf_attn=False,
+            d_feat_vec=32,
+            alpha=0.1,
+            layer_attn=False,
+            dec_feature=0,
+            input_feed=True,
+            proj_share_weight=False,
+            decay_method='',
+            translate_steps=2500,
+            beam_size=5,
+            n_best=1
+        )
+        run(opt)
 
 
 if __name__ == '__main__':
     logging.root.setLevel(logging.NOTSET)
-    os.environ["CUDA_VISIBLE_DEVICES"] = "8,9,10"
     parser = argparse.ArgumentParser()
     parser.add_argument("action", default="translate", type=str, help='What to do (e.g. "translate")',
-                        choices=("translate", "preprocess", "train"))
+                        choices=("translate", "preprocess", "train_classifier", "train_generator"))
     parser.add_argument("-ds", help="Which dataset to use for the specified action (e.g \"squad\").", type=str,
                         choices=("squad", "hotpot", "squad_debug"), default="squad")
+    parser.add_argument("-checkpoint", help="Name of the classifier model to use (name of the file with .ckpt extension"
+                                            " only).", required=False, default="", type=str)
 
     args = parser.parse_args()
     if args.action == "translate":
         translate(args.ds)
     elif args.action == "preprocess":
         preprocess(args.ds)
-    elif args.action == "train":
-        train(args.ds)
+    elif "train" in args.action:
+        if args.action == "train_classifier":
+            training_mode = "classify"
+            checkpoint = ""
+        elif args.action == "train_generator":
+            training_mode = "generate"
+            assert len(args.checkpoint) > 0
+            checkpoint = args.checkpoint
+        else:
+            raise ValueError()
+        train(args.ds, training_mode, checkpoint)

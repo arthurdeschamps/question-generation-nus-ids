@@ -29,7 +29,7 @@ def main(opt):
     checkpoint = torch.load(opt.model)
     model_opt = checkpoint['settings']
     model_opt.gpus = opt.gpus
-    model_opt.beam_size, model_opt.batch_size = opt.beam_size, opt.batch_size
+    model_opt.beam_size, model_opt.batch_size, model_opt.n_best = opt.beam_size, opt.batch_size, opt.n_best
 
     ### Prepare Data ###
     sequences = torch.load(opt.sequence_data)

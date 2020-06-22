@@ -198,7 +198,8 @@ class SupervisedTrainer(object):
         if self.opt.training_mode != 'generate':
             outputs['classification']['loss'] = total_loss['classify'] / n_node_total
             outputs['classification']['correct'] = n_node_correct / n_node_total
-            print('\n***', precison[0] / precison[1], recall[0] / recall[1], '***\n')
+            print('\n***', precison[0] / precison[1] if precison[1] > 0 else 0,
+                  recall[0] / recall[1] if recall[1] > 0 else 0, '***\n')
         if self.opt.training_mode != 'classify':
             outputs['generation']['loss'] = total_loss['generate'] / n_word_total
             outputs['generation']['correct'] = n_word_correct / n_word_total
@@ -206,7 +207,7 @@ class SupervisedTrainer(object):
             outputs['generation']['perplexity'] = math.exp(min(total_loss['nll'] / n_word_total, 16))
             if self.opt.coverage:
                 outputs['generation']['coverage'] = total_loss['coverage'] / sample_num
-            if outputs['generation']['perplexity'] <= self.opt.translate_ppl or outputs['generation']['perplexity'] > self.best_ppl:
+            if outputs['generation']['perplexity'] <= self.opt.translate_ppl or outputs['generation']['perplexity'] < self.best_ppl:
                 if self.cntBatch % self.opt.translate_steps == 0: 
                     outputs['generation']['bleu'] = self.translator.eval_all(self.model, self.validation_data)   
         if self.opt.training_mode == 'unify':
