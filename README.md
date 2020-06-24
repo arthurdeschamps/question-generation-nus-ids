@@ -14,6 +14,25 @@ nltk.download('stopwords')
 nltk.download('wordnet')
 nltk.download('averaged_perceptron_tagger')
 ```
+## How to run RepeatQ
+### What you will need to provide
+You will need to provide a JSON file containing your whole dataset (train+dev+test) with the following schema:
+```javascript
+{
+    "facts": List[String],
+    "base_question": String,
+    "target_question": String
+}
+```
+Every string should be tokenized and lower cased. An example showing how to go about 
+creating this file can be found in `data_processing.data_generator.generate_repeat_q_squad_raw`.
+### Data Processing Step
+Next, you will need to run `models.repeat_q` in `preprocessing` mode, passing in argument
+the path to the JSON file mentioned above. This will create a vocabulary file and optionally
+an embedding matrix file for you.
+### Training
+You can now train the model using `models.repeat_q` in `training` mode, passing as argument
+the folder containing the data files created during the previous step.
 ## Knowledge Graph API
 ### Google Knowledge Graph
 Please store you api key in a file ".gkg_api_key" located at the root directory 

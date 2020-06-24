@@ -16,12 +16,11 @@ import os
 from data_processing.class_defs import QAExample
 
 
-def read_squad_dataset(dataset_path: str, limit=-1, break_up_paragraphs=True):
+def read_squad_dataset(dataset_path: str, example_cls=SquadExample, limit=-1):
     """
     Loads a squad dataset (json format) from the given path.
-    :param break_up_paragraphs: If the "context" fields should only contain the sentences where the answer spans, or
-    the full paragraph.
     :param dataset_path: Path to a json formatted SQuAD dataset.
+    :param example_cls: Class of the examples to parse.
     :param limit: Limit to the number of paragraphs to load.
     :return: A list of SquadExample objects.
     """
@@ -30,11 +29,7 @@ def read_squad_dataset(dataset_path: str, limit=-1, break_up_paragraphs=True):
     squad_examples = []
     logging.info("Read squad examples...")
     for i, examples in tqdm(enumerate(ds)):
-        if break_up_paragraphs:
-            squad_example_class = SquadExample
-        else:
-            squad_example_class = SquadMultiQAExample
-        squad_examples.extend(squad_example_class.from_json(examples))
+        squad_examples.extend(example_cls.from_json(examples))
         if i == limit:
             break
     return squad_examples

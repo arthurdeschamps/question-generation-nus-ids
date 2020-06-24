@@ -3,16 +3,20 @@ import os
 import pathlib
 import shutil
 import subprocess
+from logging import info
+
 import pandas as pd
 import nltk
 import stanza
 
+from data_processing.class_defs import SquadMultiQAExample
 from data_processing.mpqg_dataset import MPQGDataset
-from data_processing.parse import read_medquad_raw_dataset
+from data_processing.parse import read_medquad_raw_dataset, read_squad_dataset
 from data_processing.utils import array_to_string
 from defs import NQG_MODEL_DIR, NQG_DATA_HOME, MEDQUAD_DIR, MEDQUAD_DEV, MEDQUAD_TRAIN, \
     MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_DIR, MEDQA_HANDMADE_RAW_DATASET_FILEPATH, HOTPOT_QA_DEV_JSON, \
-    HOTPOT_QA_DEV_TARGETS_PATH, ASS2S_PROCESSED_SQUAD_DIR, ASS2S_PROCESSED_MPQG_DATA
+    HOTPOT_QA_DEV_TARGETS_PATH, ASS2S_PROCESSED_SQUAD_DIR, ASS2S_PROCESSED_MPQG_DATA, SQUAD_TRAIN, SQUAD_DEV, \
+    REPEAT_Q_RAW_DATASETS
 from data_processing.nqg_dataset import NQGDataset
 from data_processing.pre_processing import NQGDataPreprocessor
 import numpy as np
@@ -260,6 +264,41 @@ def generate_hotpot_targets(json_data_path, savepath):
     np.savetxt(savepath, targets, fmt="%s", delimiter="\n", comments=None)
 
 
+def generate_repeat_q_squad_raw():
+    os.environ["CUDA_VISIBLE_DEVICES"] = "8"
+
+    if not os.path.isdir(REPEAT_Q_RAW_DATASETS):
+        os.makedirs(REPEAT_Q_RAW_DATASETS, exist_ok=True)
+
+    def make_example(fs, q, t):
+        return {
+            "facts": fs, "base_question": q, "target": t
+        }
+
+    stanza.download('en')
+    nlp = stanza.Pipeline(processors='tokenize')
+    squad_train = read_squad_dataset(dataset_path=SQUAD_TRAIN, example_cls=SquadMultiQAExample)
+    squad_dev = read_squad_dataset(dataset_path=SQUAD_DEV, example_cls=SquadMultiQAExample)
+    ds = []
+    for example in squad_train + squad_dev:
+        # TODO for now we use the squad sentences as facts
+        analyzed_context = nlp(example.context)
+        facts = []
+        for sentence in analyzed_context.sentences:
+            sentence_ids = " ".join([word.text for word in sentence.words]).lower()
+            facts.append(sentence_ids)
+
+        # TODO for now we use the target questions as base questions
+        for qa in example.qas:
+            analyzed_question = nlp(qa.question.question)
+            base_question = " ".join([word.text for word in analyzed_question.iter_words()]).lower()
+            # TODO for now target isn't known
+            target = ""
+            ds.append(make_example(q=base_question, fs=facts, t=target))
+    with open(f"{REPEAT_Q_RAW_DATASETS}/squad.json", mode='w') as f:
+        json.dump(ds, f)
+
+
 if __name__ == '__main__':
     import argparse
 
@@ -293,6 +332,9 @@ if __name__ == '__main__':
         dev_json = HOTPOT_QA_DEV_JSON
         result_save_path = HOTPOT_QA_DEV_TARGETS_PATH
         generate_hotpot_targets(dev_json, result_save_path)
+    elif args.dataset_name == "repeat_q_squad":
+        generate_repeat_q_squad_raw()
+        info("Raw SQuAD dataset for RepeatQ generated.")
     else:
         raise ValueError("Non-existing dataset type")
     print("Done")
