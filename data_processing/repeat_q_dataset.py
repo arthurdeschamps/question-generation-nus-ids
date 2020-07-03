@@ -42,7 +42,9 @@ class RepeatQDataset:
         max_fact_length = 0
         max_nb_facts = 0
         for example in tqdm(self.ds):
-            targets.append(self.words_to_ids(example.target.split(' ')))
+            if example.rephrased_question == "":
+                continue
+            targets.append(self.words_to_ids(example.rephrased_question.split(' ')))
             base_questions.append(self.words_to_ids(example.base_question.split(' ')))
             facts = [self.words_to_ids(fact.split(' ')) for fact in example.facts]
             max_fact_length = max(max_fact_length, max(len(fact) for fact in facts))
@@ -52,6 +54,7 @@ class RepeatQDataset:
         if not self.pad_sequences:
             return base_questions, facts_list, targets
         base_questions = self.sequence_padding(base_questions)
+        targets = self.sequence_padding(targets)
         facts_list = np.array(self.matrix_padding(facts_list, max_length=max_fact_length, max_width=max_nb_facts))
         return base_questions, facts_list, targets
 

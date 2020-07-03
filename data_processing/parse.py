@@ -116,3 +116,102 @@ def read_qa_dataset(ds_path: str, limit=-1) -> List[QAExample]:
             answer=Answer(text=datapoint['answer'], answer_start=0)
         ))
     return exs
+
+
+def next_chunk(file_reader):
+    next_content = None
+    next_line = file_reader.readline()
+    while next_line and next_line == "\n":
+        next_line = file_reader.readline()
+    while next_line and next_line != "\n":
+        next_line = next_line.strip()
+        if next_content is None:
+            next_content = [next_line]
+        else:
+            next_content.append(next_line)
+        next_line = file_reader.readline()
+    return next_content, next_line
+
+
+def read_squad_facts_dataset(facts_dirpath):
+    fact_dataset = {}
+    assert os.path.isdir(facts_dirpath)
+    print(f"Parsing {facts_dirpath}...")
+    for filename in tqdm(os.listdir(facts_dirpath)):
+        if "passage" in filename:
+            passage_facts = []
+            try:
+                passage_id = int(filename.replace("passage.", "").replace(".list", ""))
+                with open(os.path.join(facts_dirpath, filename), mode='r') as f:
+                    last_line = ""
+                    while last_line is not None:
+                        next_content, last_line = next_chunk(f)
+                        if next_content is None:
+                            break
+                        g_type = next_content[0]
+                        g_name = next_content[1]
+                        g_description = next_content[2]
+                        g_article_text = " ".join(next_content[3:])
+
+                        fields_with_keys_and_renamed_keys = zip(
+                            [g_type, g_name, g_description, g_article_text],
+                            ["GKGTYPE", "GKGNAME", "GKGDESC", "GKGARTTEXT"],
+                            ["type", "name", "description", "text"]
+                        )
+                        fact = {}
+                        for field, key, renamed_key in fields_with_keys_and_renamed_keys:
+                            assert key in field
+                            fact[renamed_key] = field.replace(key, "").strip()
+                        passage_facts.append(fact)
+
+                fact_dataset[passage_id] = passage_facts
+            except Exception as error:
+                print(error)
+                exit(-1)
+    return fact_dataset
+
+
+def read_squad_rewrites_dataset(rewrites_dirpath):
+    assert os.path.isdir(rewrites_dirpath)
+    rewrites = {}
+    print(f"Parsing {rewrites_dirpath}...")
+    for filename in tqdm(os.listdir(rewrites_dirpath)):
+        if "qw" in filename and "old" not in filename:
+            passage_rewrites = []
+            try:
+                passage_id = int(filename.replace("qw.", "").replace(".list", ""))
+                with open(os.path.join(rewrites_dirpath, filename), mode='r') as f:
+                    next_line = ""
+                    while next_line is not None:
+                        next_content, next_line = next_chunk(f)
+                        if next_content is None:
+                            break
+                        base_question = next_content[0]
+                        # Some tuples have 2 rephrased questions, which we don't really need so we ignore them
+                        rephrased = next_content[1]
+                        passage_rewrites.append({
+                            "base_question": base_question,
+                            "rephrased": rephrased
+                        })
+                rewrites[passage_id] = passage_rewrites
+            except Exception as error:
+                print(error)
+                exit(-1)
+    return rewrites
+
+
+def read_squad_base_questions_dataset(dataset_path):
+    with open(dataset_path, mode='r') as f:
+        ds = json.load(f)["data"]
+        base_questions = {}
+        print(f"Parsing {dataset_path}")
+        for passage_id, content in tqdm(enumerate(ds)):
+            questions = []
+            for paragraph in content["paragraphs"]:
+                context = paragraph["context"]
+                questions.append({
+                    "questions": [qa["question"] for qa in paragraph["qas"]],
+                    "context": context
+                })
+            base_questions[passage_id] = questions
+    return base_questions

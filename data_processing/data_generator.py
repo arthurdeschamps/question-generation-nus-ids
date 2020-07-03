@@ -3,20 +3,22 @@ import os
 import pathlib
 import shutil
 import subprocess
-from logging import info
+from logging import info, warning, debug
 
 import pandas as pd
 import nltk
 import stanza
+from tqdm import tqdm
 
-from data_processing.class_defs import SquadMultiQAExample
+from data_processing.class_defs import SquadMultiQAExample, RepeatQExample
 from data_processing.mpqg_dataset import MPQGDataset
-from data_processing.parse import read_medquad_raw_dataset, read_squad_dataset
+from data_processing.parse import read_medquad_raw_dataset, read_squad_dataset, read_squad_facts_dataset, \
+    read_squad_rewrites_dataset, read_squad_base_questions_dataset
 from data_processing.utils import array_to_string
 from defs import NQG_MODEL_DIR, NQG_DATA_HOME, MEDQUAD_DIR, MEDQUAD_DEV, MEDQUAD_TRAIN, \
     MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_DIR, MEDQA_HANDMADE_RAW_DATASET_FILEPATH, HOTPOT_QA_DEV_JSON, \
     HOTPOT_QA_DEV_TARGETS_PATH, ASS2S_PROCESSED_SQUAD_DIR, ASS2S_PROCESSED_MPQG_DATA, SQUAD_TRAIN, SQUAD_DEV, \
-    REPEAT_Q_RAW_DATASETS
+    REPEAT_Q_RAW_DATASETS, SQUAD_FACTS_TRAIN, SQUAD_FACTS_DEV, SQUAD_REWRITES_DEV
 from data_processing.nqg_dataset import NQGDataset
 from data_processing.pre_processing import NQGDataPreprocessor
 import numpy as np
@@ -265,36 +267,177 @@ def generate_hotpot_targets(json_data_path, savepath):
 
 
 def generate_repeat_q_squad_raw():
+    from nltk.corpus import stopwords
+
     os.environ["CUDA_VISIBLE_DEVICES"] = "8"
 
     if not os.path.isdir(REPEAT_Q_RAW_DATASETS):
         os.makedirs(REPEAT_Q_RAW_DATASETS, exist_ok=True)
 
-    def make_example(fs, q, t):
-        return {
-            "facts": fs, "base_question": q, "target": t
-        }
-
     stanza.download('en')
-    nlp = stanza.Pipeline(processors='tokenize')
-    squad_train = read_squad_dataset(dataset_path=SQUAD_TRAIN, example_cls=SquadMultiQAExample)
-    squad_dev = read_squad_dataset(dataset_path=SQUAD_DEV, example_cls=SquadMultiQAExample)
-    ds = []
-    for example in squad_train + squad_dev:
-        # TODO for now we use the squad sentences as facts
-        analyzed_context = nlp(example.context)
-        facts = []
-        for sentence in analyzed_context.sentences:
-            sentence_ids = " ".join([word.text for word in sentence.words]).lower()
-            facts.append(sentence_ids)
+    nlp = stanza.Pipeline(processors='tokenize,ner,pos')
+    tokenize = stanza.Pipeline(processors='tokenize')
 
-        # TODO for now we use the target questions as base questions
-        for qa in example.qas:
-            analyzed_question = nlp(qa.question.question)
-            base_question = " ".join([word.text for word in analyzed_question.iter_words()]).lower()
-            # TODO for now target isn't known
-            target = ""
-            ds.append(make_example(q=base_question, fs=facts, t=target))
+    nltk.download("stopwords")
+    stop_words = set(stopwords.words('english'))
+
+    def _filter_words(document):
+        keywords = []
+        # First retrieves entities
+        for entity in document.ents:
+            if entity.type not in ("DATE", "CARDINAL"):
+                ent_words = " ".join([w for w in entity.text.lower().split(" ") if w not in stop_words])
+                keywords.append(ent_words)
+        # Then keeps nouns that are not entities
+        for word in document.iter_words():
+            if word.upos in ("NOUN", "PROPN") and all([word.text.lower() not in ent for ent in keywords]):
+                keywords.append(word.text.lower())
+        return keywords
+
+    def _analyze_facts(facts):
+        facts_analyzed = []
+        for fact in facts:
+            analyzed_text = tokenize(fact["text"])
+            fact_text = " ".join([" ".join([w.text for w in sentence.words])
+                                 for sentence in analyzed_text.sentences])
+            if len(fact_text) == 0:
+                pass
+
+            # Since the facts were retrieved based of their names, we know these words will appear
+            # in the context. However, they will still most of the time not be relevant. Ex:
+            # Saint Mary's college high school ... -> not relevant
+            # St. Mary's canossian college / college of Maryland -> not relevant
+            # Mary was a first century galilean jewish woman -> relevant
+            # We thus remove the name words from the fact keywords
+            fact_name_words = set([w.text.lower() for w in tokenize(fact["name"]).iter_words()])
+
+            # The fact's name already matches the question or context (from the way they were generated)
+            # Checks if there is a match with some other non-trivial words to make sure the fact is relevant
+            # fact_desc_words = set([w.text.lower() for w in tokenize(fact["description"]).iter_words()] \
+            #                           if len(fact["description"]) > 0 else []) - fact_name_words
+            # fact_text_non_stop = set([w for w in fact_text.split() if w not in stop_words]) - fact_name_words
+            if len(fact["description"]) == 0:
+                fact_desc_words = []
+            else:
+                fact_desc_words = set(_filter_words(nlp(fact["description"]))) - fact_name_words
+            try:
+                fact_text_non_stop = set(_filter_words(nlp(fact_text))) - fact_name_words
+            except IndexError:
+                warning(f"Can't parse: \"{fact_text}\"")
+                continue
+
+            fact_keywords = fact_text_non_stop.union(fact_desc_words)
+
+            facts_analyzed.append({
+                "description_keywords": fact_desc_words,
+                "text_keywords": fact_text_non_stop,
+                "all_keywords": fact_keywords,
+                "tokenized_text": fact_text.lower()
+            })
+        return facts_analyzed
+
+    def _make_examples(facts, context, base_questions, rewritten_questions, passage_id):
+        # Filter out irrelevant context words
+        analyzed_context = nlp(context)
+        ctx_keywords = set(_filter_words(analyzed_context))
+
+        # Create example placeholders and filter out irrelevant question words for future word matching
+        examples = []
+        for i, base_question in enumerate(base_questions):
+            analyzed_base_question = nlp(base_question)
+            tokenized_question = " ".join([word.text.lower() for word in analyzed_base_question.iter_words()])
+            if rewritten_questions is None:
+                target = ""
+            else:
+                target = " ".join([w.text for w in tokenize(rewritten_questions[i]).iter_words()]).lower()
+            examples.append({
+                "base_question": tokenized_question,
+                "question_keywords": _filter_words(analyzed_base_question),
+                "facts": [],
+                "target": target,
+                "passage_id": passage_id
+            })
+
+        for fact in facts:
+            # First make sure the fact shares non-common words with the context
+            #ctx_fact_desc_matches = ctx_keywords.intersection(fact["description_keywords"])
+            ctx_fact_text_matches = ctx_keywords.intersection(fact["text_keywords"])
+            #if len(ctx_fact_desc_matches) * len(ctx_fact_text_matches) > 0:
+            if len(ctx_fact_text_matches) > 0:
+                # Then matches over the questions
+                for example in examples:
+                    question_matches = set(example["question_keywords"]).intersection(fact["all_keywords"])
+                    if len(question_matches) > 0:
+                        example["facts"].append(fact["tokenized_text"])
+        for example in examples:
+            # Don't need to save question keywords to be used within model
+            del example["question_keywords"]
+        return [example for example in examples if len(example["facts"]) > 0]
+
+    squad_facts_train = read_squad_facts_dataset(facts_dirpath=SQUAD_FACTS_TRAIN)
+    squad_questions_train = read_squad_base_questions_dataset(dataset_path=SQUAD_TRAIN)
+    squad_questions_dev = read_squad_base_questions_dataset(dataset_path=SQUAD_DEV)
+    squad_facts_dev = read_squad_facts_dataset(facts_dirpath=SQUAD_FACTS_DEV)
+
+    squad_dev_rewrites = read_squad_rewrites_dataset(rewrites_dirpath=SQUAD_REWRITES_DEV)
+    ds = []
+
+    def _extend_examples(new_examples, expected_size):
+        if len(new_examples) < expected_size:
+            debug(f"{len(base_questions) - len(new_examples)} examples with no facts out of {expected_size}")
+        else:
+            ds.extend(new_examples)
+
+    for passage_id in tqdm(list(squad_questions_train.keys())):
+        facts = _analyze_facts(squad_facts_train[passage_id])
+        contexts = squad_questions_train[passage_id]
+        for context_data in contexts:
+            context = context_data["context"]
+            base_questions = context_data["questions"]
+            _extend_examples(
+                _make_examples(facts=facts, context=context, base_questions=base_questions,
+                               rewritten_questions=None, passage_id=passage_id),
+                len(base_questions)
+            )
+
+    total_questions = 0
+    kept = 0
+    nb_facts_per_question = []
+    for passage_id in tqdm(squad_facts_dev.keys()):
+        facts = _analyze_facts(squad_facts_dev[passage_id])
+        question_rewrites_map = {
+            ex["base_question"]: ex["rephrased"] for ex in squad_dev_rewrites[passage_id]
+        }
+        contexts = squad_questions_dev[passage_id]
+
+        for context_data in contexts:
+            context = context_data["context"]
+            base_questions = context_data["questions"]
+            rewrites = []
+            kept_questions = []
+            for q in base_questions:
+                try:
+                    rewrites.append(question_rewrites_map[q])
+                    kept_questions.append(q)
+                except KeyError:
+                    # Some questions don't have paraphrasing candidates and that's expected
+                    pass
+            if len(rewrites) == 0:
+                continue
+            total_questions += len(kept_questions)
+            new_examples = _make_examples(
+                facts=facts, context=context, base_questions=kept_questions, rewritten_questions=rewrites,
+                passage_id=passage_id
+            )
+            kept += len(new_examples)
+            for example in new_examples:
+                nb_facts_per_question.append(len(example["facts"]))
+            _extend_examples(new_examples, len(base_questions))
+
+    print(f"Total number of questions: {total_questions}")
+    print(f"Kept: {kept}")
+    print(f"Average number of facts: {sum(nb_facts_per_question)/len(nb_facts_per_question)}")
+    exit()
     with open(f"{REPEAT_Q_RAW_DATASETS}/squad.json", mode='w') as f:
         json.dump(ds, f)
 

@@ -13,14 +13,22 @@ class Embedding(tf.keras.layers.Layer):
     def __init__(self, embedding_matrix, *args, **kwargs):
         super(Embedding, self).__init__(*args, **kwargs)
         self.embedding_matrix = embedding_matrix
+        self.supports_masking = True
 
-    def call(self, inputs, **kwargs):
+    def call(self, inputs, mask=None):
         return tf.nn.embedding_lookup(
             self.embedding_matrix, inputs, name="embedding_lookup"
         )
 
+    def compute_mask(self, inputs, previous_mask=None):
+        return tf.not_equal(inputs, 0)
+
+    @property
+    def size(self):
+        return self.embedding_matrix.shape[1]
+
     @staticmethod
-    def new(vocabulary, is_pretrained, embedding_size, embedding_path):
+    def new(vocabulary, is_pretrained, embedding_size, embedding_path, **kwargs):
         if vocabulary is None:
             raise ValueError("Vocabulary cannot be None")
 
@@ -34,7 +42,8 @@ class Embedding(tf.keras.layers.Layer):
             embedding_matrix = tf.Variable(
                 initial_value=Embedding._load_embedding_matrix(path=embedding_path),
                 trainable=False,
-                name=var_name
+                name=var_name,
+                dtype=tf.float32
             )
 
         else:
@@ -45,7 +54,7 @@ class Embedding(tf.keras.layers.Layer):
                 trainable=True,
                 name=var_name
             )
-        return Embedding(embedding_matrix=embedding_matrix)
+        return Embedding(embedding_matrix=embedding_matrix, **kwargs)
 
     @staticmethod
     def _load_embedding_matrix(path):

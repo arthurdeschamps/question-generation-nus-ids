@@ -12,13 +12,10 @@ from data_processing.repeat_q_dataset import RepeatQDataset
 from defs import UNKNOWN_TOKEN, REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_RAW_DATASETS, GLOVE_PATH, PAD_TOKEN, \
     REPEAT_Q_EMBEDDINGS_FILENAME, REPEAT_Q_VOCABULARY_FILENAME, REPEAT_Q_DATA_DIR
 from models.RepeatQ.model import RepeatQ
+from models.RepeatQ.trainer import RepeatQTrainer
 
 
-def ids_to_words(ids, ids_to_words_voc):
-    return " ".join(ids_to_words_voc[id_] for id_ in ids)
-
-
-def make_tf_dataset(base_questions, facts_list, targets, batch_size=1, nb_epochs=1):
+def make_tf_dataset(base_questions, facts_list, targets, batch_size=1):
     def _gen():
         for base_question, facts, target in zip(base_questions, facts_list, targets):
             yield ({
@@ -31,8 +28,7 @@ def make_tf_dataset(base_questions, facts_list, targets, batch_size=1, nb_epochs
                                                 "facts": tf.int32, "base_question": tf.int32
                                             }, tf.int32)) \
         .shuffle(buffer_size=len(base_questions), reshuffle_each_iteration=True) \
-        .batch(batch_size=batch_size, drop_remainder=True) \
-        .repeat(count=nb_epochs)
+        .batch(batch_size=batch_size, drop_remainder=True)
 
 
 def get_data(data_dir, vocabulary, data_limit, batch_size):
@@ -55,10 +51,8 @@ def train(data_dir, data_limit, batch_size):
     # Gets the default vocabulary from NQG from now
     data = get_data(data_dir, model.vocabulary_word_to_id, data_limit, batch_size)
     training_data, dev_data, test_data = data["train"], data["dev"], data["test"]
-    for features, label in training_data:
-        facts_ids = model(features, training=True)
-        for i in range(facts_ids.shape[1]):
-            print(ids_to_words(facts_ids[0][i].numpy(), reverse_voc))
+    trainer = RepeatQTrainer(model, training_data, reverse_voc)
+    trainer.train()
 
 
 def translate():
@@ -82,10 +76,12 @@ def create_embedding_matrix(pretrained_path, vocab, pad_token, unk_token):
         while embeddings[i] is None:
             i += 1
         embeddings[vocab[pad_token]] = np.zeros_like(embeddings[i])
+        vocab.pop(pad_token)
     # Mean vector assigned to unknown token and words not found in the given pre-embeddings
     mean_embedding = np.mean(np.array([emb for emb in embeddings if emb is not None]), axis=0)
     if unk_token in vocab:
         embeddings[vocab[unk_token]] = mean_embedding
+        vocab.pop(unk_token)
     for not_found_word in vocab:
         embeddings[vocab[not_found_word]] = mean_embedding
     info("Embedding matrix generation completed.")
@@ -98,7 +94,9 @@ def generate_vocabulary(ds, save_dir, voc_size, unk_token, pad_token) -> Dict[st
     frequencies = {}
     for dp in tqdm(ds):
         assert all(k in dp for k in ("facts", "base_question", "target"))
-        words = " ".join(dp["facts"]).split() + dp["base_question"].split(" ") + dp["target"].split(" ")
+        words = " ".join(dp["facts"]).split() + dp["base_question"].split(" ")
+        if dp["target"] != "":
+            words += dp["target"].split(" ")
         for word in words:
             frequencies[word] = frequencies.get(word, 0) + 1
     # Keeps the PAD and UNKNOWN tokens as well as the voc_size - 2 most frequent words
@@ -106,6 +104,7 @@ def generate_vocabulary(ds, save_dir, voc_size, unk_token, pad_token) -> Dict[st
     frequencies = sorted(frequencies, key=frequencies.get, reverse=True)
     for i, word in enumerate(frequencies[:voc_size - 2]):
         vocabulary[i + 2] = word
+    vocabulary = [w for w in vocabulary if len(w) > 0]
     # Saves the vocabulary
     with open(f"{save_dir}/{REPEAT_Q_VOCABULARY_FILENAME}", mode='w') as f:
         for word in vocabulary:
@@ -122,7 +121,10 @@ def preprocess(dataset_path, save_dir, ds_name, voc_size, pretrained_embeddings_
     if not dataset_path.endswith(".json"):
         raise ValueError("Dataset file must be a JSON file.")
     with open(dataset_path, mode='r') as f:
-        ds = json.load(f)
+        content = f.readlines()[0]
+        content = content.replace(', {"base_question": "in a 2009 national readership survey , what newspaper has '
+                                  'the highest number of abc1 25 - 44 readers ?", "target": "", "facts": ', ']')
+        ds = json.loads(content)
 
     pad_token = PAD_TOKEN
     unk_token = UNKNOWN_TOKEN
@@ -145,7 +147,7 @@ def preprocess(dataset_path, save_dir, ds_name, voc_size, pretrained_embeddings_
 
 if __name__ == '__main__':
     logging.getLogger(__name__).setLevel(logging.NOTSET)
-    os.environ["CUDA_VISIBLE_DEVICES"] = "8"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "7"
     parser = argparse.ArgumentParser()
     parser.add_argument("action", default="train", type=str, choices=("translate", "preprocess", "train"))
     parser.add_argument("-data_dir", help="Used if action is train or translate. Directory path where all the data "

@@ -83,16 +83,16 @@ class SquadMultiQAExample(JsonParsable):
 
 class RepeatQExample(JsonParsable):
 
-    def __init__(self, base_question: str, facts: List[str], target: Optional[str], *args, **kwargs):
+    def __init__(self, base_question: str, facts: List[str], rephrased_question: Optional[str], *args, **kwargs):
         super(RepeatQExample, self).__init__(*args, **kwargs)
         self.base_question = base_question
         self.facts = facts
-        self.target = target
+        self.rephrased_question = rephrased_question
 
     @staticmethod
     def from_json(json) -> List['RepeatQExample']:
         return [RepeatQExample(
-            base_question=example["base_question"], facts=example["facts"], target=example["target"]
+            base_question=example["base_question"], facts=example["facts"], rephrased_question=example["target"]
         ) for example in json]
 
 

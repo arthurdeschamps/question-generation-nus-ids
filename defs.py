@@ -4,6 +4,7 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 MODELS_DIR = f"{ROOT_DIR}/models"
 NQG_MODEL_DIR = f"{MODELS_DIR}/nqg"
+REPEAT_Q_MODEL_DIR = f"{MODELS_DIR}/repeat_q"
 
 DATA_DIR = f"{ROOT_DIR}/data"
 PROCESSED_DATA_DIR = f"{DATA_DIR}/processed"
@@ -12,6 +13,10 @@ NQG_DATA_HOME = f"{PROCESSED_DATA_DIR}/nqg"
 SQUAD_DIR = f"{DATA_DIR}/squad_dataset"
 SQUAD_TRAIN = f"{SQUAD_DIR}/train-v1.1.json"
 SQUAD_DEV = f"{SQUAD_DIR}/dev-v1.1.json"
+
+SQUAD_FACTS_TRAIN = f"{SQUAD_DIR}/facts_train"
+SQUAD_FACTS_DEV = f"{SQUAD_DIR}/facts_dev"
+SQUAD_REWRITES_DEV = f"{SQUAD_DIR}/rewrites"
 
 MEDQUAD_DIR = f"{DATA_DIR}/medquad_dataset"
 MEDQUAD_RAW_DIR = f"{MEDQUAD_DIR}/MedQuAD_raw"
