@@ -76,6 +76,7 @@ REPEAT_Q_DATA_DIR = f"{PROCESSED_DATA_DIR}/repeat_q"
 REPEAT_Q_RAW_DATASETS = f"{REPEAT_Q_DATA_DIR}/raw_datasets"
 PAD_TOKEN = "<blank>"
 UNKNOWN_TOKEN = "<unk>"
+EOS_TOKEN = "<eos>"
 
 REPEAT_Q_SQUAD_DATA_DIR = f"{REPEAT_Q_DATA_DIR}/squad"
 REPEAT_Q_EMBEDDINGS_FILENAME = "embeddings.npy"

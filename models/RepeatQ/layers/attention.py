@@ -27,11 +27,12 @@ class Attention(tf.keras.layers.Layer):
 
     def call(self, attended_vectors, decoder_hidden_state=None, apply_softmax=True, **kwargs):
         assert attended_vectors is not None
+        assert decoder_hidden_state is not None
         # We need to duplicate the decoder's hidden state to be able to compute the alignment scores for each
         # attended vector
         decoder_hidden_state = tf.repeat(
             tf.expand_dims(decoder_hidden_state, axis=1),
-            repeats=self.sequence_length,
+            repeats=tf.shape(attended_vectors)[1],
             axis=1,
             name=f"decoder_hidden_state_repeated"
         )

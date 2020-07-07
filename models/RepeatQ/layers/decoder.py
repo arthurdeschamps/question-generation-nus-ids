@@ -4,8 +4,16 @@ import tensorflow_addons as tfa
 
 class Decoder(tf.keras.layers.Layer):
 
-    def __init__(self, embedding_layer, question_attention_mechanism, facts_attention_mechanism, units,
-                 recurrent_dropout, readout_size, vocab_size, bos_token, **kwargs):
+    def __init__(self,
+                 embedding_layer,
+                 question_attention_mechanism,
+                 facts_attention_mechanism,
+                 units,
+                 recurrent_dropout,
+                 readout_size,
+                 vocab_size,
+                 bos_token,
+                 **kwargs):
         """
         :param embedding_layer: Embedding layer to embed the tokens predicted by this decoder.
         :param question_attention_mechanism: Attention layer.
@@ -18,10 +26,6 @@ class Decoder(tf.keras.layers.Layer):
         """
         super(Decoder, self).__init__(**kwargs)
         self.embedding_layer = embedding_layer
-        # self.cell = DecoderCell(
-        #     embedding_layer, bos_token, question_attention_mechanism, facts_attention_mechanism, readout_size,
-        #     vocab_size, units=units, recurrent_dropout=recurrent_dropout
-        # )
         self.lstm_cell = tf.keras.layers.LSTMCell(units, recurrent_dropout=recurrent_dropout)
         self.hidden_size = units
         self.zero_embedding_vector = None
@@ -38,6 +42,7 @@ class Decoder(tf.keras.layers.Layer):
         self.facts_encodings = None
         self.base_question_embeddings = None
         self.batch_dim = None
+        self.sequence_length = None
 
         # Output sub-layer weights
         self.W_r = tf.keras.layers.Dense(units=self.readout_size, name="decoder_W_r")
@@ -50,51 +55,50 @@ class Decoder(tf.keras.layers.Layer):
 
     def build(self, input_shape):
         self.batch_dim = input_shape["base_question_embeddings"][0]
-        self.bos_embedding = tf.zeros((self.batch_dim, self.embedding_layer.size))
+        self.sequence_length = input_shape["base_question_embeddings"][1]
 
     def call(self, inputs, training=None, **kwargs):
         base_question_embeddings = inputs["base_question_embeddings"]
-        facts_hidden_states = inputs["facts_hidden_states"]
-        nb_steps = inputs["nb_steps"]
-        target = inputs["target"]
-        sequence_logits = tf.TensorArray(size=nb_steps, dtype=tf.float32, name="sequence_logits")
+        facts_encodings = inputs["facts_encodings"]
 
-        time_step = tf.constant(0, dtype=tf.int32, name="time_step")
-        previous_token_embedding = self.bos_embedding
+        batch_dim = base_question_embeddings.shape[0]
 
-        hidden_state, carry_state = self.lstm_cell.get_initial_state(batch_size=self.batch_dim, dtype=tf.float32)
+        hidden_state, carry_state = tf.cond(
+            tf.equal(tf.size(inputs["decoder_state"][0]), 0),
+            lambda: tuple(self.lstm_cell.get_initial_state(batch_size=batch_dim, dtype=tf.float32)),
+            lambda: inputs["decoder_state"]
+        )
+        previous_token_embedding = tf.cond(
+            tf.equal(tf.size(inputs["previous_token_embedding"]), 0),
+            lambda: tf.zeros((batch_dim, self.embedding_layer.size)),
+            lambda: inputs["previous_token_embedding"]
+        )
 
-        while tf.less(time_step, nb_steps):
-            # Compute question attention vectors
-            base_question_attention_vector = self._compute_question_attention_vectors(
-                base_question_embeddings, hidden_state
-            )
-            # Compute fact attention vectors
-            fact_attention_vector = self._compute_facts_attention_vectors(
-                facts_hidden_states, hidden_state
-            )
+        hidden_state.set_shape((batch_dim, self.hidden_size))
+        carry_state.set_shape((batch_dim, self.hidden_size))
+        previous_token_embedding.set_shape((batch_dim, self.embedding_layer.size))
 
-            # Create the decoder's next input and add the "sequence dimension", which is 1 as we go one step at a time
-            decoder_input = tf.concat(
-                (previous_token_embedding, fact_attention_vector, base_question_attention_vector),
-                axis=1
-            )
+        # Compute question attention vectors
+        base_question_attention_vector = self._compute_question_attention_vectors(
+            base_question_embeddings, hidden_state
+        )
+        # Compute fact attention vectors
+        fact_attention_vector = self._compute_facts_attention_vectors(
+            facts_encodings, hidden_state
+        )
 
-            output, (hidden_state, carry_state) = self.lstm_cell(decoder_input, (hidden_state, carry_state))
+        # Create the decoder's next input
+        decoder_input = tf.concat(
+            (previous_token_embedding, fact_attention_vector, base_question_attention_vector),
+            axis=1
+        )
+        output, (hidden_state, carry_state) = self.lstm_cell(
+            decoder_input, (hidden_state, carry_state), training=training
+        )
 
-            # Compute logits
-            logits = self._output_layer(hidden_state, decoder_input, base_question_attention_vector)
-            sequence_logits = sequence_logits.write(time_step, logits)
-            if training:
-                previous_token_embedding = self.embedding_layer(target[:, time_step])
-            else:
-                predicted_token_id = tf.argmax(
-                    tf.math.softmax(logits), axis=-1, name="predicted_token_id", output_type=tf.int32
-                )
-                previous_token_embedding = self.embedding_layer(predicted_token_id)
-            time_step = tf.add(time_step, 1)
-
-        return tf.reshape(sequence_logits.stack(), shape=(self.batch_dim, nb_steps, -1))
+        # Compute logits
+        logits = self._output_layer(hidden_state, decoder_input, base_question_attention_vector)
+        return logits, (hidden_state, carry_state)
 
     def _output_layer(self, hidden_state, previous_input, base_question_attention_vector):
         previous_input = previous_input

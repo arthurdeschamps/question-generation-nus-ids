@@ -14,9 +14,10 @@ class ModelConfiguration:
                  facts_attention_function="additive",
                  attention_depth=256,
                  embeddings_pretrained=True,
-                 embedding_size=None,
+                 embedding_size=300,
                  decoder_hidden_size=512,
                  decoder_readout_size=256,
+                 batch_size=32,
                  data_dir=REPEAT_Q_SQUAD_DATA_DIR):
         super(ModelConfiguration, self).__init__()
         self.recurrent_dropout = recurrent_dropout
@@ -32,6 +33,7 @@ class ModelConfiguration:
         self.decoder_hidden_size = decoder_hidden_size
         self.max_generated_question_length = max_generated_question_length
         self.decoder_readout_size = decoder_readout_size
+        self.batch_size = batch_size
 
     @staticmethod
     def build_config(config) -> 'ModelConfiguration':

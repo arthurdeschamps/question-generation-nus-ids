@@ -10,8 +10,10 @@ from tqdm import tqdm
 
 from data_processing.repeat_q_dataset import RepeatQDataset
 from defs import UNKNOWN_TOKEN, REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_RAW_DATASETS, GLOVE_PATH, PAD_TOKEN, \
-    REPEAT_Q_EMBEDDINGS_FILENAME, REPEAT_Q_VOCABULARY_FILENAME, REPEAT_Q_DATA_DIR
+    REPEAT_Q_EMBEDDINGS_FILENAME, REPEAT_Q_VOCABULARY_FILENAME, REPEAT_Q_DATA_DIR, EOS_TOKEN
 from models.RepeatQ.model import RepeatQ
+from models.RepeatQ.model_config import ModelConfiguration
+from models.RepeatQ.rl.environment import RepeatQEnvironment
 from models.RepeatQ.trainer import RepeatQTrainer
 
 
@@ -45,13 +47,22 @@ def get_data(data_dir, vocabulary, data_limit, batch_size):
     return datasets
 
 
+def build_vocabulary(vocabulary_path):
+    token_to_id = {}
+    with open(vocabulary_path, mode='r') as vocab_file:
+        for i, token in enumerate(vocab_file.readlines()):
+            token_to_id[token.strip()] = i
+    return token_to_id
+
+
 def train(data_dir, data_limit, batch_size):
-    model = RepeatQ()
-    reverse_voc = {v: k for k, v in model.vocabulary_word_to_id.items()}
+    default_config = ModelConfiguration.build_config({})
+    default_config.batch_size = batch_size
+    vocabulary = build_vocabulary(default_config.vocabulary_path)
     # Gets the default vocabulary from NQG from now
-    data = get_data(data_dir, model.vocabulary_word_to_id, data_limit, batch_size)
+    data = get_data(data_dir, vocabulary, data_limit, batch_size)
     training_data, dev_data, test_data = data["train"], data["dev"], data["test"]
-    trainer = RepeatQTrainer(model, training_data, reverse_voc)
+    trainer = RepeatQTrainer(default_config, training_data, vocabulary)
     trainer.train()
 
 
@@ -88,7 +99,7 @@ def create_embedding_matrix(pretrained_path, vocab, pad_token, unk_token):
     return np.array(embeddings, dtype=np.float)
 
 
-def generate_vocabulary(ds, save_dir, voc_size, unk_token, pad_token) -> Dict[str, int]:
+def generate_vocabulary(ds, save_dir, voc_size, unk_token, pad_token, eos_token) -> Dict[str, int]:
     # Compute word occurrence frequencies
     info("Generating vocabulary...")
     frequencies = {}
@@ -99,11 +110,12 @@ def generate_vocabulary(ds, save_dir, voc_size, unk_token, pad_token) -> Dict[st
             words += dp["target"].split(" ")
         for word in words:
             frequencies[word] = frequencies.get(word, 0) + 1
-    # Keeps the PAD and UNKNOWN tokens as well as the voc_size - 2 most frequent words
-    vocabulary = [pad_token, unk_token] + ["" for _ in range(voc_size - 2)]
+    # Keeps special tokens as well as the voc_size - len(special words) most frequent words
+    special_tokens = [pad_token, unk_token, eos_token]
+    vocabulary = special_tokens + ["" for _ in range(voc_size - len(special_tokens))]
     frequencies = sorted(frequencies, key=frequencies.get, reverse=True)
-    for i, word in enumerate(frequencies[:voc_size - 2]):
-        vocabulary[i + 2] = word
+    for i, word in enumerate(frequencies[:voc_size - len(special_tokens)]):
+        vocabulary[i + len(special_tokens)] = word
     vocabulary = [w for w in vocabulary if len(w) > 0]
     # Saves the vocabulary
     with open(f"{save_dir}/{REPEAT_Q_VOCABULARY_FILENAME}", mode='w') as f:
@@ -128,8 +140,9 @@ def preprocess(dataset_path, save_dir, ds_name, voc_size, pretrained_embeddings_
 
     pad_token = PAD_TOKEN
     unk_token = UNKNOWN_TOKEN
+    eos_token = EOS_TOKEN
 
-    vocab = generate_vocabulary(ds, save_dir, voc_size, unk_token=unk_token, pad_token=pad_token)
+    vocab = generate_vocabulary(ds, save_dir, voc_size, unk_token=unk_token, pad_token=pad_token, eos_token=eos_token)
     # Keeps the embeddings for the words in the vocabulary and saves them to a file for later use
     if pretrained_embeddings_path is not None:
         embeddings = create_embedding_matrix(pretrained_embeddings_path, vocab, pad_token, unk_token)
@@ -147,9 +160,9 @@ def preprocess(dataset_path, save_dir, ds_name, voc_size, pretrained_embeddings_
 
 if __name__ == '__main__':
     logging.getLogger(__name__).setLevel(logging.NOTSET)
-    os.environ["CUDA_VISIBLE_DEVICES"] = "7"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "8"
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", default="train", type=str, choices=("translate", "preprocess", "train"))
+    parser.add_argument("action", default="train", type=str, choices=("translate", "preprocess", "train", "train_rl"))
     parser.add_argument("-data_dir", help="Used if action is train or translate. Directory path where all the data "
                                           "files are located.", type=str, required=False,
                         default=REPEAT_Q_SQUAD_DATA_DIR)
@@ -177,7 +190,7 @@ if __name__ == '__main__':
                         default=30000)
     parser.add_argument("-batch_size", type=int, default=64)
     args = parser.parse_args()
-    if args.action == "train":
+    if args.action  == "train":
         assert args.data_dir is not None
         train(args.data_dir, args.data_limit, args.batch_size)
         info("Training completed.")
