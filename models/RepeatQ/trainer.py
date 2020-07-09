@@ -1,17 +1,14 @@
-from collections import namedtuple
-from datetime import datetime
 from logging import info
-
-import tensorflow as tf
 import tensorflow_addons as tfa
+import tensorflow as tf
 from tf_agents.agents.reinforce import reinforce_agent
 from tf_agents.environments import tf_py_environment
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
-from tf_agents.specs import TensorSpec, tensor_spec
+from tf_agents.specs import tensor_spec
 from tf_agents.trajectories import trajectory, time_step
 from tf_agents.utils import common
 from tqdm import tqdm
-from defs import REPEAT_Q_MODEL_DIR, EOS_TOKEN, PAD_TOKEN
+from defs import PAD_TOKEN
 from models.RepeatQ.model import RepeatQ
 from models.RepeatQ.model_config import ModelConfiguration
 from models.RepeatQ.rl.environment import RepeatQEnvironment
@@ -109,60 +106,70 @@ class RepeatQTrainer:
         avg_return = total_return / num_episodes
         return avg_return.numpy()[0]
 
-    def train(self, nb_epochs=15):
+    def train(self, nb_epochs=25):
         self.model = RepeatQ(self.vocabulary, self.config)
         env = self._build_environment()
-        env = tf_py_environment.TFPyEnvironment(env)
         for epoch in range(nb_epochs):
-            info(f"Starting Epoch {epoch + 1}.")
+            phase = "supervised" if epoch <= 25 else "unsupervised"
+            tf.print(f"Starting Epoch {epoch + 1}.")
             for features, label in tqdm(self.training_data):
-                features["target"] = label
-                self.episode(features, label, env)
+                features["target"] = features["base_question"]
+                features["facts"] = features["facts"][:, :3]
+                self.episode(features, label, env, phase=phase)
 
     @tf.function
-    def episode(self, features, labels, environment):
+    def episode(self, features, labels, environment, phase="supervised"):
         batch_size = features["facts"].shape[0]
-        nb_facts = features["facts"].shape[1]
-        fact_length = features["facts"].shape[2]
-        base_question_length = features["base_question"].shape[1]
-        n_state = RepeatQ.NetworkState(
-            observation=tf.zeros(shape=(batch_size,), dtype=tf.int32),
-            base_question=features["base_question"],
-            facts=features["facts"],
-            facts_encodings=tf.zeros(shape=(batch_size, nb_facts, fact_length, 2*self.config.fact_encoder_hidden_size)),
-            base_question_embeddings=tf.zeros(shape=(batch_size, base_question_length, self.config.embedding_size)),
-            decoder_states=(tf.zeros(shape=(batch_size, self.config.decoder_hidden_size)),
-                            tf.zeros(shape=(batch_size, self.config.decoder_hidden_size))),
-            is_first_step=True
-        )
+
+        def debug_output(predictions):
+            print("Predicted: ", " ".join([self.reverse_voc[int(t)] for t in predictions if int(t) != 0]))
+            return 0
+
         with tf.GradientTape() as tape:
-            time_step = environment.reset()
-            rewards = tf.TensorArray(dtype=tf.float32, size=self.config.max_generated_question_length, name="rewards")
-            log_probs = tf.TensorArray(dtype=tf.float32, size=self.config.max_generated_question_length, name="log_probs")
-            ite = tf.constant(0, dtype=tf.int32)
-            while not time_step.is_last():
-                action, log_prob, n_state = self.model.get_action(n_state, training=True)
-                time_step = environment.step(action=(
-                    action,
-                    features["base_question"]
-                ))
-                # TODO remove the [0] selectors
-                rewards = rewards.write(ite, time_step.reward[0])
-                log_probs = log_probs.write(ite, log_prob[0])
-                ite = tf.add(ite, 1)
-            rewards = rewards.stack()[:ite]
-            log_probs = log_probs.stack()[:ite]
-            policy_gradient = self.get_gradient(rewards, log_probs)
-            tf.print("Policy gradient", policy_gradient, "\n")
-        gradients = tape.gradient(policy_gradient, self.model.trainable_variables)
+            target = features["target"]
+            actions, logits = self.model.get_actions([
+                features["base_question"], features["facts"]
+            ], target=target, training=True, phase=phase)
+            tf.py_function(debug_output, inp=(actions[0],), Tout=tf.int32)
+
+            if phase == "unsupervised":
+                mean_gradient = self._policy_gradient(actions, logits, features, environment, batch_size)
+            elif phase == "supervised":
+                mask = tf.cast(tf.not_equal(target, 0), dtype=tf.float32, name="seq_loss_mask")
+                mean_gradient = tfa.seq2seq.sequence_loss(
+                    logits=logits, targets=target, weights=mask, sum_over_batch=True, sum_over_timesteps=True,
+                    average_across_timesteps=False, average_across_batch=False
+                )
+        tf.print("Mean gradient: ", mean_gradient)
+        gradients = tape.gradient(mean_gradient, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+        return mean_gradient
 
-        return policy_gradient
+    def _policy_gradient(self, actions, logits, features, environment, batch_size):
 
-    def get_gradient(self, rewards, log_probs):
+        def compute_reward(predictions, base_question):
+            return environment.compute_reward(predictions, base_question)
+
+        gradients = tf.TensorArray(dtype=tf.float32, size=self.config.batch_size, name="grads")
+        log_probs = tf.reduce_max(tf.math.softmax(logits, axis=-1), axis=-1)
+        log_probs = tf.math.log(log_probs, name="log_probs")
+        for i in tf.range(batch_size):
+            episode_actions = actions[i]
+            episode_log_probs = log_probs[i]
+            episode_reward = tf.py_function(compute_reward, inp=(episode_actions, features["base_question"][i]),
+                                            Tout=tf.float32)
+            episode_rewards = tf.concat(
+                (tf.zeros(shape=(tf.size(episode_actions) - 1,)), [episode_reward]), axis=0
+            )
+            policy_gradient = self._get_policy_gradient(episode_rewards, episode_log_probs)
+            gradients = gradients.write(i, policy_gradient)
+        policy_gradient_mean = tf.reduce_mean(gradients.stack())
+        tf.print("Policy gradient", policy_gradient_mean, "\n")
+        return policy_gradient_mean
+
+    def _get_policy_gradient(self, rewards, log_probs):
         discount_factor = 0.9
         discounted_rewards = tf.TensorArray(size=len(rewards), dtype=tf.float32)
-        tf.print("Rewards: ", rewards)
         for t in range(len(rewards)):
             Gt = 0.0
             pw = 0.0
@@ -171,12 +178,11 @@ class RepeatQTrainer:
                 pw = pw + 1
             discounted_rewards = discounted_rewards.write(t, Gt)
         discounted_rewards = discounted_rewards.stack()
-        std = tf.math.reduce_std(discounted_rewards) + 1e-9
-        mean = tf.reduce_mean(discounted_rewards, axis=-1)
+        std = tf.math.reduce_std(discounted_rewards, axis=0) + 1e-9
+        mean = tf.reduce_mean(discounted_rewards, axis=0)
         discounted_rewards = (discounted_rewards - mean) / std  # normalize discounted rewards
-        tf.print("Discounter rewards: ", discounted_rewards)
         policy_gradient = -log_probs * discounted_rewards
-        policy_gradient = tf.reduce_sum(policy_gradient, axis=-1)
+        policy_gradient = tf.reduce_sum(policy_gradient, axis=0)
         return policy_gradient
 
     @staticmethod
@@ -185,11 +191,10 @@ class RepeatQTrainer:
 
     def _build_environment(self):
         environment = RepeatQEnvironment(
-            eos_token=self.vocabulary["?"], # TODO re-generate dataset to have the EOS token in vocabulary
+            eos_token=self.vocabulary["?"],  # TODO re-generate dataset to have the EOS token in vocabulary
             pad_token=self.vocabulary[PAD_TOKEN],
             max_sequence_length=self.config.max_generated_question_length,
-            reverse_vocabulary=self.reverse_voc,
-            batch_size=self.config.batch_size
+            reverse_vocabulary=self.reverse_voc
         )
         return environment
 

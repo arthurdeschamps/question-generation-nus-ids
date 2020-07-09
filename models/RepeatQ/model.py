@@ -13,10 +13,7 @@ from models.RepeatQ.model_config import ModelConfiguration
 
 
 class RepeatQ(tf.keras.models.Model):
-
     NetworkState = namedtuple("NetworkState", (
-        "base_question",
-        "facts",
         "base_question_embeddings",
         "facts_encodings",
         "decoder_states",
@@ -40,43 +37,101 @@ class RepeatQ(tf.keras.models.Model):
         self.fact_encoder = self._build_fact_encoder()
         self.decoder = self._build_decoder()
 
-    def call(self, inputs, training=None, mask=None):
-        if inputs.is_first_step:
-            base_question_embeddings = self.embedding_layer(inputs.base_question)
-        else:
-            base_question_embeddings = inputs.base_question_embeddings
-        if inputs.is_first_step:
-            facts_embeddings = self.embedding_layer(inputs.facts)
-            facts_encodings = self.fact_encoder(facts_embeddings, training=training)
-        else:
-            facts_encodings = inputs.facts_encodings
-        logits, decoder_states = self.decoder({
-            "base_question_embeddings": base_question_embeddings,
-            "facts_encodings": facts_encodings,
-            "previous_token_embedding": self.embedding_layer(inputs.observation),
-            "decoder_state": inputs.decoder_states
-        })
-        return logits, base_question_embeddings, facts_encodings, decoder_states
+        #self.lstm = tf.keras.layers.LSTM(units=512, return_sequences=True)
 
-    def get_action(self, network_state, training):
-        logits, bqe, facts_encodings, decoder_states = self(network_state, training=training)
-        probs = tf.math.softmax(logits, axis=-1, name="probs")
-        log_probs = tf.math.log(probs, name="log_prob")
-        predicted_tokens = tf.argmax(probs, axis=-1, output_type=tf.int32, name="pred_tokens")
-        log_prob = tf.reshape(
-            tf.gather(log_probs, predicted_tokens, batch_dims=1), shape=(-1,)
-        )
-        predicted_tokens = tf.reshape(predicted_tokens, shape=(-1,))
+    def call(self, inputs, constants=None, training=None, mask=None):
+
+        logits, (hidden_state, carry_state) = self.decoder({
+                "base_question_embeddings": inputs.base_question_embeddings,
+                "facts_encodings": inputs.facts_encodings,
+                "previous_token_embedding": self.embedding_layer(inputs.observation),
+                "decoder_state": inputs.decoder_states
+        })
+
+        # Only decodes further for non-finished beams (last token wasn't a padding token)
+        mask = tf.expand_dims(tf.logical_or(tf.not_equal(inputs.observation, 0), inputs.is_first_step), axis=-1)
+
+        hidden_state = tf.where(mask, hidden_state, inputs.decoder_states[0])
+        carry_state = tf.where(mask, carry_state, inputs.decoder_states[1])
+
+        return logits, (hidden_state, carry_state)
+
+    def get_actions(self, inputs, target, training, phase):
+        finished = tf.fill(dims=(tf.shape(target)[0],), value=False)
+
+        if phase == "supervised":
+            size = target.shape[1]
+        elif phase == "unsupervised":
+            size = self.config.max_generated_question_length
+        else:
+            raise NotImplementedError()
+
+        base_question, facts = inputs[0], inputs[1]
+        base_question_embeddings = self.embedding_layer(base_question)
+        facts_embeddings = self.embedding_layer(facts)
+        facts_encodings = self.fact_encoder(facts_embeddings, training=training)
+
         network_state = RepeatQ.NetworkState(
-            base_question=network_state.base_question,
-            facts=network_state.facts,
-            base_question_embeddings=bqe,
+            base_question_embeddings=base_question_embeddings,
             facts_encodings=facts_encodings,
-            decoder_states=decoder_states,
-            observation=predicted_tokens,
-            is_first_step=False
+            decoder_states=(
+                tf.zeros(shape=(self.config.batch_size, self.config.decoder_hidden_size)),
+                tf.zeros(shape=(self.config.batch_size, self.config.decoder_hidden_size))
+            ),
+            observation=tf.zeros(shape=(self.config.batch_size,), dtype=tf.int32),
+            is_first_step=True
         )
-        return predicted_tokens, log_prob, network_state
+
+        # embs = self.embedding_layer(network_state.base_question)
+        # outputs = self.lstm(embs, mask=tf.not_equal(target, 0), training=True)
+        # logits = self.decoder.W_y(outputs)
+        # actions = tf.argmax(tf.math.softmax(logits, axis=-1), axis=-1)
+        # return actions, logits
+
+        all_logits = tf.TensorArray(dtype=tf.float32, size=size, name="logits")
+        actions = tf.TensorArray(dtype=tf.int32, size=size, name="agent_actions")
+        ite = tf.constant(0, dtype=tf.int32)
+
+        def _continue_loop(it, beams_finished):
+            if phase == "supervised":
+                return tf.less(it, size)
+            else:
+                return tf.reduce_any(tf.logical_not(beams_finished))
+
+        while _continue_loop(ite, finished):
+            logits, decoder_states = self(network_state, training=training)
+            probs = tf.math.softmax(logits, axis=-1, name="probs")
+            predicted_tokens = tf.argmax(probs, axis=-1, output_type=tf.int32, name="pred_tokens")
+            actions = actions.write(ite, predicted_tokens)
+            all_logits = all_logits.write(ite, logits)
+
+            if phase == "supervised" and training:
+                # In supervised and training mode, we use teacher forcing
+                observation = target[:, ite]
+            else:
+                # Otherwise, the model uses its own predicted tokens
+                observation = predicted_tokens
+
+            network_state = RepeatQ.NetworkState(
+                base_question_embeddings=network_state.base_question_embeddings,
+                facts_encodings=network_state.facts_encodings,
+                decoder_states=decoder_states,
+                observation=observation,
+                is_first_step=False
+            )
+            ite = tf.add(ite, 1)
+            finished = tf.repeat(tf.equal(size, ite), repeats=(tf.shape(target)[0],))
+            if phase == "supervised":
+                # Goes all the way to the target length
+                finished = tf.logical_or(finished, tf.equal(target[:, tf.minimum(size-1, ite)], 0))
+            elif phase == "unsupervised":
+                finished = tf.logical_or(finished, tf.equal(predicted_tokens, 0))
+            else:
+                raise NotImplementedError()
+        # Switch from time major to batch major
+        actions = tf.transpose(actions.stack()[:ite])
+        all_logits = tf.transpose(all_logits.stack()[:ite], perm=[1, 0, 2])
+        return actions, all_logits
 
     def _build_decoder(self):
         question_attention = self._build_attention_layer("base_question_attention")

@@ -160,7 +160,7 @@ def preprocess(dataset_path, save_dir, ds_name, voc_size, pretrained_embeddings_
 
 if __name__ == '__main__':
     logging.getLogger(__name__).setLevel(logging.NOTSET)
-    os.environ["CUDA_VISIBLE_DEVICES"] = "8"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "9"
     parser = argparse.ArgumentParser()
     parser.add_argument("action", default="train", type=str, choices=("translate", "preprocess", "train", "train_rl"))
     parser.add_argument("-data_dir", help="Used if action is train or translate. Directory path where all the data "
@@ -190,7 +190,7 @@ if __name__ == '__main__':
                         default=30000)
     parser.add_argument("-batch_size", type=int, default=64)
     args = parser.parse_args()
-    if args.action  == "train":
+    if args.action == "train":
         assert args.data_dir is not None
         train(args.data_dir, args.data_limit, args.batch_size)
         info("Training completed.")

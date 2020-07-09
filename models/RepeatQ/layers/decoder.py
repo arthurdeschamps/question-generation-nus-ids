@@ -74,10 +74,6 @@ class Decoder(tf.keras.layers.Layer):
             lambda: inputs["previous_token_embedding"]
         )
 
-        hidden_state.set_shape((batch_dim, self.hidden_size))
-        carry_state.set_shape((batch_dim, self.hidden_size))
-        previous_token_embedding.set_shape((batch_dim, self.embedding_layer.size))
-
         # Compute question attention vectors
         base_question_attention_vector = self._compute_question_attention_vectors(
             base_question_embeddings, hidden_state

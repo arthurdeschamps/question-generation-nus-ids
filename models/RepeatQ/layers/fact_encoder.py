@@ -11,9 +11,8 @@ class FactEncoder(tf.keras.layers.Layer):
         self.encoder = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
             units=encoder_hidden_size,
             recurrent_dropout=recurrent_dropout,
-            go_backwards=True,
             return_sequences=True
-        ))
+        ), merge_mode="concat")
 
     def call(self, facts, training=None, mask=None, **kwargs):
         # Fact embeddings have shape (batch_size, nb_facts, fact_seq_length, embedding_size)

@@ -18,7 +18,7 @@ class RepeatQEnvironment(PyEnvironment):
             self.predicted_tokens = predicted_tokens
             self.sequence_index = sequence_index
 
-    def __init__(self, reverse_vocabulary, max_sequence_length, eos_token, pad_token, batch_size):
+    def __init__(self, reverse_vocabulary, max_sequence_length, eos_token, pad_token):
         super(RepeatQEnvironment, self).__init__()
 
         self.voc = reverse_vocabulary
@@ -63,16 +63,15 @@ class RepeatQEnvironment(PyEnvironment):
             state.predicted_tokens = self._state.predicted_tokens
         self._state = state
 
-    def compute_reward(self, final_state, base_question):
-        predicted_tokens = self._make_sequence(final_state.predicted_tokens)
-        # TODO remove [0] for batches
-        base_question = self._make_sequence(base_question[0])
-        tf.print("Predicted: ", " ".join([self.voc[int(t)] for t in predicted_tokens]))
-        tf.print("Base: ", " ".join([self.voc[int(t)] for t in base_question]))
+    def compute_reward(self, predicted_tokens, base_question):
+        predicted_tokens = self._make_sequence(predicted_tokens.numpy())
+        base_question = self._make_sequence(base_question.numpy())
+
         if len(predicted_tokens) == 0:
             return 0.0
         reward = sum(weight * reward_fn(predicted_tokens, base_question)
                      for weight, reward_fn in self.weighted_reward_functions)
+        tf.print("Reward: ", reward)
         return reward
 
     def observation_spec(self):
@@ -85,7 +84,6 @@ class RepeatQEnvironment(PyEnvironment):
         pass
 
     def _step(self, action):
-        # TODO make work with batch
         predicted_token = action[0][0]
         if self._episode_ended:
             return self._reset()
@@ -127,7 +125,7 @@ class RepeatQEnvironment(PyEnvironment):
             def _bleu_n(predicted_tokens, base_question):
                 weights = [1.0/n for _ in range(n)]
                 score = bleu.sentence_bleu([base_question], predicted_tokens, weights=weights)
-                tf.print("BLEU-", n, " ", score)
+                #tf.print("BLEU-", n, " ", score)
                 return score
             return _bleu_n
 
@@ -135,14 +133,20 @@ class RepeatQEnvironment(PyEnvironment):
             penalty = -float(len(predicted_tokens))/len(base_question)
             return penalty
 
+        def _repetitiveness_penalty(predicted_tokens, _):
+            penalty = 0.0
+            for i in range(1, len(predicted_tokens)):
+                if predicted_tokens[i] == predicted_tokens[i-1]:
+                    penalty += 0.01
+            return -penalty
         return {
-            (0.25, _bleu(1)),
-            (0.25, _bleu(2)),
-            (0.25, _bleu(3)),
-            (0.20, _bleu(4))
+            #(0.25, _bleu(1)),
+            (0.33, _bleu(2)),
+            (0.33, _bleu(3)),
+            (0.33, _bleu(4)),
         }
 
-    def _make_sequence(self, tokens: List[Tensor]):
+    def _make_sequence(self, tokens: Tensor):
         no_pad = [str(t) for t in tokens if t != self.pad_token]
         return no_pad
 
