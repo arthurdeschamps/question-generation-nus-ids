@@ -125,37 +125,50 @@ def generate_vocabulary(ds, save_dir, voc_size, unk_token, pad_token, eos_token)
     return {vocabulary[index]: index for index in range(len(vocabulary))}
 
 
-def preprocess(dataset_path, save_dir, ds_name, voc_size, pretrained_embeddings_path=None):
+def preprocess(data_dirpath, save_dir, ds_name, voc_size, pretrained_embeddings_path=None):
+    if not os.path.isdir(data_dirpath):
+        err_message = f"Directory \"{data_dirpath}\" does not exist."
+        raise ValueError(err_message)
+
+    ds_test_path = f"{data_dirpath}/{ds_name}_test.json"
+    if not os.path.isfile(ds_test_path):
+        raise ValueError(f"Dataset '{ds_test_path}' does not exist.")
+    ds_train_path = f"{data_dirpath}/{ds_name}_train.json"
+    if not os.path.isfile(ds_train_path):
+        raise ValueError(f"Dataset '{ds_train_path}' does not exist.")
+
     save_dir = f"{save_dir}/{ds_name}"
     if not os.path.isdir(save_dir):
         os.makedirs(save_dir, exist_ok=True)
 
-    if not dataset_path.endswith(".json"):
-        raise ValueError("Dataset file must be a JSON file.")
-    with open(dataset_path, mode='r') as f:
-        content = f.readlines()[0]
-        content = content.replace(', {"base_question": "in a 2009 national readership survey , what newspaper has '
-                                  'the highest number of abc1 25 - 44 readers ?", "target": "", "facts": ', ']')
-        ds = json.loads(content)
+    with open(ds_test_path, mode='r') as f:
+        ds_test = json.load(f)
+    with open(ds_train_path, mode='r') as f:
+        ds_train = json.load(f)
 
     pad_token = PAD_TOKEN
     unk_token = UNKNOWN_TOKEN
     eos_token = EOS_TOKEN
 
-    vocab = generate_vocabulary(ds, save_dir, voc_size, unk_token=unk_token, pad_token=pad_token, eos_token=eos_token)
+    vocab = generate_vocabulary(ds_test + ds_train, save_dir, voc_size, unk_token=unk_token, pad_token=pad_token,
+                                eos_token=eos_token)
     # Keeps the embeddings for the words in the vocabulary and saves them to a file for later use
     if pretrained_embeddings_path is not None:
         embeddings = create_embedding_matrix(pretrained_embeddings_path, vocab, pad_token, unk_token)
         np.save(f"{save_dir}/{REPEAT_Q_EMBEDDINGS_FILENAME}", embeddings)
-    # Creates the data split  (80/10/10)
-    d1 = int(0.8 * len(ds))
-    d2 = int(d1 + 0.1 * len(ds))
-    ds_train = ds[:d1]
-    ds_dev = ds[d1:d2]
-    ds_test = ds[d2:]
-    for prefix, data in zip(("train", "dev", "test"), (ds_train, ds_dev, ds_test)):
-        with open(f"{save_dir}/{prefix}.data.json", mode='w') as f:
+
+    def _save_ds(ds_type, data):
+        with open(f"{save_dir}/{ds_type}.data.json", mode='w') as f:
             json.dump(data, f)
+
+    _save_ds("test", ds_test)
+    # Split train into train/dev
+    d1 = int(0.9 * len(ds_train))
+    ds_train_train = ds_train[:d1]
+    ds_train_dev = ds_train[d1:]
+
+    _save_ds("dev", ds_train_dev)
+    _save_ds("train", ds_train_train)
 
 
 if __name__ == '__main__':
@@ -169,17 +182,17 @@ if __name__ == '__main__':
     parser.add_argument("-save_dir", help="Used if action is preprocess. Base directory where the processed files will "
                                           "be saved.", type=str, required=False, default=REPEAT_Q_DATA_DIR)
     parser.add_argument("-ds_name", help="Used if action is preprocess. A simple string indicating the name of the "
-                                         "dataset to create. This will be appended to the 'save_dir' argument, if "
-                                         "provided, or to the default data directory.", required=False, default=None,
+                                         "dataset to create. This will be used in addition to the 'save_dir' argument, "
+                                         "if provided, or to the default data directory, to compute the final data "
+                                         "paths",
+                        required=False, default=None,
                         type=str)
     parser.add_argument("-data_limit", help="Number of examples to use for training. Default to -1, which means "
                                             "taking the whole dataset.", type=int, default=-1, required=False)
-    parser.add_argument("-json_path", help="Used if action is preprocess. Path to a JSON file with the schema presented"
-                                           "in the README file. This file should contain all data, including train, "
-                                           "dev and test data. Please omit target values when these are not known. For"
-                                           "an example, see "
-                                           "data_preprocessing.data_generator.generate_repeat_q_squad_raw()",
-                        type=str, required=False, default=f"{REPEAT_Q_RAW_DATASETS}/squad.json")
+    parser.add_argument("-data_dirpath", help="Used if action is preprocess. Directory path containing 2 JSON files "
+                                              "with the schema presented in the README file. These files' names should "
+                                              "contain the suffixes _test and _train.",
+                        type=str, required=False, default=f"{REPEAT_Q_RAW_DATASETS}")
     parser.add_argument("-pretrained_embeddings_path", type=str,
                         help="Path to a pre-trained set of embeddings. If passed, it"
                              "will be used to generate an embedding file to use"
@@ -195,8 +208,8 @@ if __name__ == '__main__':
         train(args.data_dir, args.data_limit, args.batch_size)
         info("Training completed.")
     elif args.action == "preprocess":
-        assert all(arg is not None for arg in (args.save_dir, args.json_path, args.ds_name))
-        preprocess(args.json_path, args.save_dir, args.ds_name, args.voc_size, args.pretrained_embeddings_path)
+        assert all(arg is not None for arg in (args.save_dir, args.data_dirpath, args.ds_name))
+        preprocess(args.data_dirpath, args.save_dir, args.ds_name, args.voc_size, args.pretrained_embeddings_path)
         info("Preprocessing completed successfully.")
     elif args.action == "translate":
         translate()

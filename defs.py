@@ -14,9 +14,10 @@ SQUAD_DIR = f"{DATA_DIR}/squad_dataset"
 SQUAD_TRAIN = f"{SQUAD_DIR}/train-v1.1.json"
 SQUAD_DEV = f"{SQUAD_DIR}/dev-v1.1.json"
 
-SQUAD_FACTS_TRAIN = f"{SQUAD_DIR}/facts_train"
-SQUAD_FACTS_DEV = f"{SQUAD_DIR}/facts_dev"
-SQUAD_REWRITES_DEV = f"{SQUAD_DIR}/rewrites"
+SQUAD_FACTS_TRAIN = f"{SQUAD_DIR}/train_filtered"
+SQUAD_REWRITES_TRAIN = f"{SQUAD_DIR}/train_rewrites"
+SQUAD_FACTS_DEV = f"{SQUAD_DIR}/dev_filtered"
+SQUAD_REWRITES_DEV = f"{SQUAD_DIR}/dev_rewrites"
 
 MEDQUAD_DIR = f"{DATA_DIR}/medquad_dataset"
 MEDQUAD_RAW_DIR = f"{MEDQUAD_DIR}/MedQuAD_raw"
