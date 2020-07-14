@@ -10,7 +10,8 @@ from tqdm import tqdm
 
 from data_processing.repeat_q_dataset import RepeatQDataset
 from defs import UNKNOWN_TOKEN, REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_RAW_DATASETS, GLOVE_PATH, PAD_TOKEN, \
-    REPEAT_Q_EMBEDDINGS_FILENAME, REPEAT_Q_VOCABULARY_FILENAME, REPEAT_Q_DATA_DIR, EOS_TOKEN
+    REPEAT_Q_EMBEDDINGS_FILENAME, REPEAT_Q_VOCABULARY_FILENAME, REPEAT_Q_DATA_DIR, EOS_TOKEN, TRAINED_MODELS_DIR, \
+    REPEAT_Q_TRAIN_CHECKPOINTS_DIR
 from models.RepeatQ.model import RepeatQ
 from models.RepeatQ.model_config import ModelConfiguration
 from models.RepeatQ.rl.environment import RepeatQEnvironment
@@ -56,19 +57,32 @@ def build_vocabulary(vocabulary_path):
 
 
 def train(data_dir, data_limit, batch_size):
-    default_config = ModelConfiguration.build_config({})
-    default_config.batch_size = batch_size
+    default_config = ModelConfiguration.new().with_batch_size(batch_size).with_supervised_epochs(15)
     vocabulary = build_vocabulary(default_config.vocabulary_path)
     # Gets the default vocabulary from NQG from now
-    data = get_data(data_dir, vocabulary, data_limit, batch_size)
+    data = get_data(data_dir, vocabulary, data_limit, default_config.batch_size)
     training_data, dev_data, test_data = data["train"], data["dev"], data["test"]
-    trainer = RepeatQTrainer(default_config, training_data, vocabulary)
+    model = RepeatQ(vocabulary, default_config)
+    trainer = RepeatQTrainer(default_config, model, training_data, dev_data, vocabulary)
     trainer.train()
 
 
-def translate():
-    raise NotImplementedError()
-
+def translate(model_dir, data_dir):
+    config = ModelConfiguration.new().with_batch_size(1)
+    vocabulary = build_vocabulary(config.vocabulary_path)
+    reverse_voc = {v: k for k, v in vocabulary.items()}
+    data = get_data(data_dir=data_dir, vocabulary=vocabulary, data_limit=-1, batch_size=config.batch_size)["test"]
+    model = RepeatQ(vocabulary, config)
+    model.load_weights(model_dir)
+    
+    def to_string(tokens):
+        return " ".join([reverse_voc[t] for t in tokens if t != 0])
+    
+    for feature, label in data:
+        print("Target: " + to_string(label[0].numpy()))
+        translated = model.infer(feature)
+        print("Hypothesis: " + to_string(translated) + "\n")
+        
 
 def create_embedding_matrix(pretrained_path, vocab, pad_token, unk_token):
     embeddings = [None for _ in range(len(vocab))]
@@ -189,7 +203,7 @@ if __name__ == '__main__':
                         type=str)
     parser.add_argument("-data_limit", help="Number of examples to use for training. Default to -1, which means "
                                             "taking the whole dataset.", type=int, default=-1, required=False)
-    parser.add_argument("-data_dirpath", help="Used if action is preprocess. Directory path containing 2 JSON files "
+    parser.add_argument("-preprocess_data_dir", help="Used if action is preprocess. Directory path containing 2 JSON files "
                                               "with the schema presented in the README file. These files' names should "
                                               "contain the suffixes _test and _train.",
                         type=str, required=False, default=f"{REPEAT_Q_RAW_DATASETS}")
@@ -202,6 +216,7 @@ if __name__ == '__main__':
                                                     "file will contain the n most frequent words", required=False,
                         default=30000)
     parser.add_argument("-batch_size", type=int, default=64)
+    parser.add_argument("-model_name", type=str, required=False)
     args = parser.parse_args()
     if args.action == "train":
         assert args.data_dir is not None
@@ -209,8 +224,9 @@ if __name__ == '__main__':
         info("Training completed.")
     elif args.action == "preprocess":
         assert all(arg is not None for arg in (args.save_dir, args.data_dirpath, args.ds_name))
-        preprocess(args.data_dirpath, args.save_dir, args.ds_name, args.voc_size, args.pretrained_embeddings_path)
+        preprocess(args.preprocess_data_dir, args.save_dir, args.ds_name, args.voc_size, args.pretrained_embeddings_path)
         info("Preprocessing completed successfully.")
     elif args.action == "translate":
-        translate()
+        assert args.model_name is not None and args.data_dir is not None
+        translate(f"{REPEAT_Q_TRAIN_CHECKPOINTS_DIR}/{args.model_name}", args.data_dir)
         info("Translation completed.")

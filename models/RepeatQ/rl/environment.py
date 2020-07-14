@@ -64,8 +64,8 @@ class RepeatQEnvironment(PyEnvironment):
         self._state = state
 
     def compute_reward(self, predicted_tokens, base_question):
-        predicted_tokens = self._make_sequence(predicted_tokens.numpy())
-        base_question = self._make_sequence(base_question.numpy())
+        predicted_tokens = self.make_sequence(predicted_tokens.numpy())
+        base_question = self.make_sequence(base_question.numpy())
 
         if len(predicted_tokens) == 0:
             return 0.0
@@ -140,14 +140,20 @@ class RepeatQEnvironment(PyEnvironment):
                     penalty += 0.01
             return -penalty
         return {
-            #(0.25, _bleu(1)),
-            (0.33, _bleu(2)),
-            (0.33, _bleu(3)),
-            (0.33, _bleu(4)),
+            (1.0, _bleu(1)),
+            (1.0, _bleu(2)),
+            (1.0, _bleu(3)),
+            (1.0, _bleu(4)),
+            (0.1, _repetitiveness_penalty),
+            (0.05, _length_penalty)
         }
 
-    def _make_sequence(self, tokens: Tensor):
+    def make_sequence(self, tokens: Tensor):
         no_pad = [str(t) for t in tokens if t != self.pad_token]
+        try:
+            return no_pad[no_pad.index(str(self.eos_token)):]
+        except ValueError:
+            pass
         return no_pad
 
     def _initial_state(self):

@@ -6,6 +6,7 @@ from defs import NQG_SQUAD_DATASET, REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_VOCABULARY
 class ModelConfiguration:
 
     def __init__(self,
+                 nb_epochs=20,
                  recurrent_dropout=0.1,
                  fact_encoder_hidden_size=512,
                  base_question_encoder_hidden_size=512,
@@ -18,7 +19,10 @@ class ModelConfiguration:
                  decoder_hidden_size=512,
                  decoder_readout_size=256,
                  batch_size=32,
-                 data_dir=REPEAT_Q_SQUAD_DATA_DIR):
+                 data_dir=REPEAT_Q_SQUAD_DATA_DIR,
+                 restore_supervised_checkpoint=False,
+                 supervised_epochs=6,
+                 dev_step_size=100):
         super(ModelConfiguration, self).__init__()
         self.recurrent_dropout = recurrent_dropout
         self.fact_encoder_hidden_size = fact_encoder_hidden_size
@@ -34,14 +38,35 @@ class ModelConfiguration:
         self.max_generated_question_length = max_generated_question_length
         self.decoder_readout_size = decoder_readout_size
         self.batch_size = batch_size
+        self.restore_supervised_checkpoint = restore_supervised_checkpoint
+        self.supervised_epochs = supervised_epochs
+        self.epochs = nb_epochs
+        self.dev_step_size = dev_step_size
 
     @staticmethod
-    def build_config(config) -> 'ModelConfiguration':
-        config = ModelConfiguration(**config)
-        info("\nModel Parameters:\n--------------------------\n" +
-             str(config) +
-             "--------------------------\n")
+    def new() -> 'ModelConfiguration':
+        config = ModelConfiguration()
         return config
+
+    def with_batch_size(self, batch_size):
+        self.batch_size = batch_size
+        return self
+
+    def with_restore_supervised_checkpoint(self):
+        self.restore_supervised_checkpoint = True
+        return self
+
+    def with_supervised_epochs(self, nb_epochs):
+        self.supervised_epochs = nb_epochs
+        return self
+
+    def with_epochs(self, nb_epochs):
+        self.epochs = nb_epochs
+        return self
+
+    def with_dev_step_size(self, dev_step_size):
+        self.dev_step_size = dev_step_size
+        return self
 
     def __str__(self):
         str_builder = ""
