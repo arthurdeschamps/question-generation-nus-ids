@@ -1,8 +1,10 @@
+import logging
 from collections import namedtuple
-
+import os
 import tensorflow as tf
 import numpy as np
-from defs import REPEAT_Q_EMBEDDINGS_FILENAME, PAD_TOKEN
+from defs import REPEAT_Q_EMBEDDINGS_FILENAME, PAD_TOKEN, REPEAT_Q_TRAIN_CHECKPOINTS_DIR
+from logging_mixin import LoggingMixin
 from models.RepeatQ.layers.decoder import Decoder
 from models.RepeatQ.layers.embedding import Embedding
 from models.RepeatQ.layers.fact_encoder import FactEncoder
@@ -10,7 +12,8 @@ from models.RepeatQ.layers.attention import Attention
 from models.RepeatQ.model_config import ModelConfiguration
 
 
-class RepeatQ(tf.keras.models.Model):
+class RepeatQ(LoggingMixin, tf.keras.models.Model):
+
     NetworkState = namedtuple("NetworkState", (
         "base_question_embeddings",
         "facts_encodings",
@@ -36,6 +39,16 @@ class RepeatQ(tf.keras.models.Model):
         self.fact_encoder = self._build_fact_encoder()
         self.decoder = self._build_decoder()
 
+        if config.restore_supervised_checkpoint:
+            path = config.supervised_model_checkpoint_path
+            if path is None:
+                self.log.fatal("When 'restore_supervised_checkpoint' is enabled, you must provide a path to a model "
+                               "checkpoint")
+                exit(-1)
+            path = f"{REPEAT_Q_TRAIN_CHECKPOINTS_DIR}/{path}"
+            self.load_weights(path)
+            self.log.info(f"Model successfully restored from '{path}'.")
+
     def call(self, inputs, constants=None, training=None, mask=None):
 
         logits, (hidden_state, carry_state) = self.decoder({
@@ -45,8 +58,14 @@ class RepeatQ(tf.keras.models.Model):
                 "decoder_state": inputs.decoder_states
         })
 
-        # Only decodes further for non-finished beams (last token wasn't a padding token)
-        mask = tf.expand_dims(tf.logical_or(tf.not_equal(inputs.observation, 0), inputs.is_first_step), axis=-1)
+        # Only decodes further for non-finished beams (last token wasn't a padding token or a question mark)
+        mask = tf.expand_dims(tf.logical_or(
+            tf.logical_and(
+                tf.not_equal(inputs.observation, 0),
+                tf.not_equal(inputs.observation, self.question_mark_id)
+            ),
+            inputs.is_first_step
+        ), axis=-1)
 
         hidden_state = tf.where(mask, hidden_state, inputs.decoder_states[0])
         carry_state = tf.where(mask, carry_state, inputs.decoder_states[1])
@@ -82,7 +101,12 @@ class RepeatQ(tf.keras.models.Model):
             logits, decoder_states = self(network_state, training=training)
             probs = tf.math.softmax(logits, axis=-1, name="probs")
             if phase == RepeatQTrainer.reinforce_phase and training:
-                predicted_tokens = tf.squeeze(tf.random.categorical(logits, num_samples=1, dtype=tf.int32), axis=1)
+                predicted_tokens = \
+                    tf.where(
+                        finished,
+                        tf.zeros(shape=(self.config.batch_size,), dtype=tf.int32),
+                        tf.squeeze(tf.random.categorical(logits, num_samples=1, dtype=tf.int32), axis=1)
+                    )
             else:
                 predicted_tokens = tf.argmax(probs, axis=-1, output_type=tf.int32, name="pred_tokens")
             actions = actions.write(ite, predicted_tokens)
@@ -103,15 +127,18 @@ class RepeatQ(tf.keras.models.Model):
                 is_first_step=False
             )
             ite = tf.add(ite, 1)
-            finished = tf.repeat(tf.equal(size, ite), repeats=(tf.shape(target)[0],))
+            finished = tf.logical_or(finished, tf.repeat(tf.equal(size, ite), repeats=(tf.shape(target)[0],)))
             if phase == RepeatQTrainer.supervised_phase:
                 # Goes all the way to the target length
                 finished = tf.logical_or(finished, tf.equal(target[:, tf.minimum(size-1, ite)], 0))
             elif phase == RepeatQTrainer.reinforce_phase:
-                finished = tf.logical_or(finished, tf.logical_or(tf.equal(predicted_tokens, 0),
-                                                                 tf.equal(predicted_tokens, self.question_mark_id)))
+                finished = tf.logical_or(
+                    finished,
+                    tf.logical_or(tf.equal(predicted_tokens, 0), tf.equal(predicted_tokens, self.question_mark_id))
+                )
             else:
                 raise NotImplementedError()
+            finished.set_shape(shape=(self.config.batch_size,))
         # Switch from time major to batch major
         actions = tf.transpose(actions.stack()[:ite])
         all_logits = tf.transpose(all_logits.stack()[:ite], perm=[1, 0, 2])

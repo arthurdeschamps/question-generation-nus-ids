@@ -56,14 +56,24 @@ def build_vocabulary(vocabulary_path):
     return token_to_id
 
 
-def train(data_dir, data_limit, batch_size):
-    default_config = ModelConfiguration.new().with_batch_size(batch_size).with_supervised_epochs(15)
-    vocabulary = build_vocabulary(default_config.vocabulary_path)
+def train(data_dir, data_limit, batch_size, learning_rate, epochs, supervised_epochs, checkpoint_name, save_model):
+    config = ModelConfiguration.new()\
+        .with_batch_size(batch_size)\
+        .with_supervised_epochs(0)\
+        .with_epochs(epochs)\
+        .with_supervised_epochs(supervised_epochs)\
+        .with_saving_model(save_model)
+    info(str(config))
+    if learning_rate is not None:
+        config = config.with_learning_rate(learning_rate)
+    if checkpoint_name is not None:
+        config = config.with_restore_supervised_checkpoint().with_supervised_model_checkpoint_path(checkpoint_name)
+    vocabulary = build_vocabulary(config.vocabulary_path)
     # Gets the default vocabulary from NQG from now
-    data = get_data(data_dir, vocabulary, data_limit, default_config.batch_size)
+    data = get_data(data_dir, vocabulary, data_limit, config.batch_size)
     training_data, dev_data, test_data = data["train"], data["dev"], data["test"]
-    model = RepeatQ(vocabulary, default_config)
-    trainer = RepeatQTrainer(default_config, model, training_data, dev_data, vocabulary)
+    model = RepeatQ(vocabulary, config)
+    trainer = RepeatQTrainer(config, model, training_data, dev_data, vocabulary)
     trainer.train()
 
 
@@ -189,7 +199,7 @@ if __name__ == '__main__':
     logging.getLogger(__name__).setLevel(logging.NOTSET)
     os.environ["CUDA_VISIBLE_DEVICES"] = "9"
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", default="train", type=str, choices=("translate", "preprocess", "train", "train_rl"))
+    parser.add_argument("action", default="train", type=str, choices=("translate", "preprocess", "train"))
     parser.add_argument("-data_dir", help="Used if action is train or translate. Directory path where all the data "
                                           "files are located.", type=str, required=False,
                         default=REPEAT_Q_SQUAD_DATA_DIR)
@@ -203,9 +213,10 @@ if __name__ == '__main__':
                         type=str)
     parser.add_argument("-data_limit", help="Number of examples to use for training. Default to -1, which means "
                                             "taking the whole dataset.", type=int, default=-1, required=False)
-    parser.add_argument("-preprocess_data_dir", help="Used if action is preprocess. Directory path containing 2 JSON files "
-                                              "with the schema presented in the README file. These files' names should "
-                                              "contain the suffixes _test and _train.",
+    parser.add_argument("-preprocess_data_dir", 
+                        help="Used if action is preprocess. Directory path containing 2 JSON files with the schema "
+                             "presented in the README file. These files' names should contain the suffixes _test and "
+                             "_train.",
                         type=str, required=False, default=f"{REPEAT_Q_RAW_DATASETS}")
     parser.add_argument("-pretrained_embeddings_path", type=str,
                         help="Path to a pre-trained set of embeddings. If passed, it"
@@ -216,17 +227,37 @@ if __name__ == '__main__':
                                                     "file will contain the n most frequent words", required=False,
                         default=30000)
     parser.add_argument("-batch_size", type=int, default=64)
-    parser.add_argument("-model_name", type=str, required=False)
+    parser.add_argument("-learning_rate", type=float, required=False, 
+                        help="Learning rate for the optimizer. Default is whatever default value is used by TF's Adam "
+                             "optimizer implementation")
+    parser.add_argument("-supervised_epochs", type=int, default=10,
+                        help="Number of epochs to train the model in supervised mode for. The rest of the epochs"
+                             "will be spent training in RL mode.")
+    parser.add_argument("-nb_epochs", type=int, default=20, help="Total number of epochs to train for.", required=False)
+    parser.add_argument("-model_checkpoint_name", type=str, required=False, default=None,
+                        help="Name of a checkpoint of the model to resume from. When in translate mode, the model"
+                             "will be loaded and directly used to make predictions. When in train or train_rl mode,"
+                             " training will resume from the checkpoint and continue with the provided parameters.")
+    parser.add_argument("--save_model", action="store_true", help="Add this flag to save checkpoints while training.")
     args = parser.parse_args()
     if args.action == "train":
         assert args.data_dir is not None
-        train(args.data_dir, args.data_limit, args.batch_size)
+        train(
+            data_dir=args.data_dir, 
+            data_limit=args.data_limit, 
+            batch_size=args.batch_size,
+            learning_rate=args.learning_rate,
+            epochs=args.nb_epochs,
+            supervised_epochs=args.supervised_epochs,
+            checkpoint_name=args.model_checkpoint_name,
+            save_model=args.save_model
+        )
         info("Training completed.")
     elif args.action == "preprocess":
         assert all(arg is not None for arg in (args.save_dir, args.data_dirpath, args.ds_name))
         preprocess(args.preprocess_data_dir, args.save_dir, args.ds_name, args.voc_size, args.pretrained_embeddings_path)
         info("Preprocessing completed successfully.")
     elif args.action == "translate":
-        assert args.model_name is not None and args.data_dir is not None
-        translate(f"{REPEAT_Q_TRAIN_CHECKPOINTS_DIR}/{args.model_name}", args.data_dir)
+        assert args.model_checkpoint_name is not None and args.data_dir is not None
+        translate(f"{REPEAT_Q_TRAIN_CHECKPOINTS_DIR}/{args.model_checkpoint_name}", args.data_dir)
         info("Translation completed.")

@@ -1,13 +1,13 @@
 ###############################################################################
-# Set default behavior to automatically normalize line endings.
+# Set new behavior to automatically normalize line endings.
 ###############################################################################
 * text=auto
 
 ###############################################################################
-# Set default behavior for command prompt diff.
+# Set new behavior for command prompt diff.
 #
 # This is need for earlier builds of msysgit that does not have it on by
-# default for csharp files.
+# new for csharp files.
 # Note: This is only used by command line
 ###############################################################################
 #*.cs     diff=csharp
@@ -38,7 +38,7 @@
 ###############################################################################
 # behavior for image files
 #
-# image files are treated as binary by default.
+# image files are treated as binary by new.
 ###############################################################################
 #*.jpg   binary
 #*.png   binary

@@ -1,6 +1,7 @@
 from collections import namedtuple
 from typing import List
 import nltk.translate.bleu_score as bleu
+from nltk.translate.meteor_score import meteor_score
 from tensorflow import Tensor
 from tf_agents.environments.py_environment import PyEnvironment
 from tf_agents.specs import BoundedArraySpec, BoundedTensorSpec
@@ -18,11 +19,12 @@ class RepeatQEnvironment(PyEnvironment):
             self.predicted_tokens = predicted_tokens
             self.sequence_index = sequence_index
 
-    def __init__(self, reverse_vocabulary, max_sequence_length, eos_token, pad_token):
+    def __init__(self, vocabulary, reversed_vocabulary, max_sequence_length, eos_token, pad_token):
         super(RepeatQEnvironment, self).__init__()
 
-        self.voc = reverse_vocabulary
-        self.voc_size = len(reverse_vocabulary)
+        self.word_to_token_voc = vocabulary
+        self.token_to_word_voc = reversed_vocabulary
+        self.voc_size = len(vocabulary)
         self.max_sequence_length = max_sequence_length
         self.eos_token = eos_token
         self.pad_token = pad_token
@@ -63,16 +65,22 @@ class RepeatQEnvironment(PyEnvironment):
             state.predicted_tokens = self._state.predicted_tokens
         self._state = state
 
-    def compute_reward(self, predicted_tokens, base_question):
+    def compute_reward(self, predicted_tokens, base_question, target_question):
         predicted_tokens = self.make_sequence(predicted_tokens.numpy())
         base_question = self.make_sequence(base_question.numpy())
+        target_question = self.make_sequence(target_question.numpy())
 
         if len(predicted_tokens) == 0:
-            return 0.0
-        reward = sum(weight * reward_fn(predicted_tokens, base_question)
-                     for weight, reward_fn in self.weighted_reward_functions)
-        tf.print("Reward: ", reward)
+            return 1e-9
+
+        def compute_reward(candidate):
+            return sum(weight * reward_fn(candidate, target_question) for weight, reward_fn in
+                       self.weighted_reward_functions)
+
+        baseline_reward = compute_reward(base_question)
+        reward = compute_reward(predicted_tokens)
         return reward
+        return reward - baseline_reward
 
     def observation_spec(self):
         return self._obs_spec
@@ -98,20 +106,12 @@ class RepeatQEnvironment(PyEnvironment):
 
         current_state.sequence_index += 1
         if self._episode_ended:
-            reward = self.compute_reward(current_state, action[1])
+            reward = self.compute_reward(current_state, action[1], action[2])
             return ts.termination(np.array([predicted_token], dtype=np.int32), [reward])
         else:
-            # Penalize repeating oneself
-            if tf.equal(
-                current_state.predicted_tokens[current_state.sequence_index-2],
-                current_state.predicted_tokens[current_state.sequence_index-1]
-            ):
-                reward = -0.1
-            else:
-                reward = 0.0
             return ts.transition(
                 observation=np.array([predicted_token], dtype=np.int32),
-                reward=[reward],  # Length penalty
+                reward=[0],
                 discount=[1.0]
             )
 
@@ -122,36 +122,40 @@ class RepeatQEnvironment(PyEnvironment):
 
     def _build_reward_functions(self):
         def _bleu(n):
-            def _bleu_n(predicted_tokens, base_question):
+            def _bleu_n(candidate, target_question):
                 weights = [1.0/n for _ in range(n)]
-                score = bleu.sentence_bleu([base_question], predicted_tokens, weights=weights)
-                #tf.print("BLEU-", n, " ", score)
+                score = bleu.sentence_bleu([target_question], candidate, weights=weights)
                 return score
             return _bleu_n
 
-        def _length_penalty(predicted_tokens, base_question):
-            penalty = -float(len(predicted_tokens))/len(base_question)
+        def _meteor(candidate, target_question):
+            predicted_sentence = " ".join(self.token_to_word_voc[int(t)] for t in candidate)
+            target = " ".join(self.token_to_word_voc[int(t)] for t in target_question)
+            score = meteor_score([target], predicted_sentence)
+            return score
+
+        def _repetitiveness_penalty(candidate, _):
+            unique_words = set(candidate)
+            penalty = -(len(candidate) - len(unique_words))
             return penalty
 
-        def _repetitiveness_penalty(predicted_tokens, _):
-            penalty = 0.0
-            for i in range(1, len(predicted_tokens)):
-                if predicted_tokens[i] == predicted_tokens[i-1]:
-                    penalty += 0.01
-            return -penalty
+        def _contains_question_mark(candidate, _):
+            return 1.0 if candidate[-1] == str(self.word_to_token_voc["?"]) else 0.0
+
         return {
-            (1.0, _bleu(1)),
-            (1.0, _bleu(2)),
-            (1.0, _bleu(3)),
-            (1.0, _bleu(4)),
-            (0.1, _repetitiveness_penalty),
-            (0.05, _length_penalty)
+            # (5.0, _bleu(1)),
+            # (10.0, _bleu(2)),
+            # (50.0, _bleu(3)),
+            # (100.0, _bleu(4)),
+            (1.0, _contains_question_mark),
+            #(0.5, _repetitiveness_penalty),
+            (10.0, _meteor)
         }
 
     def make_sequence(self, tokens: Tensor):
         no_pad = [str(t) for t in tokens if t != self.pad_token]
         try:
-            return no_pad[no_pad.index(str(self.eos_token)):]
+            return no_pad[:no_pad.index(str(self.eos_token))+1]
         except ValueError:
             pass
         return no_pad

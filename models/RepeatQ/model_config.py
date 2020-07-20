@@ -1,6 +1,4 @@
-from logging import info
-
-from defs import NQG_SQUAD_DATASET, REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_VOCABULARY_FILENAME
+from defs import REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_VOCABULARY_FILENAME
 
 
 class ModelConfiguration:
@@ -21,8 +19,11 @@ class ModelConfiguration:
                  batch_size=32,
                  data_dir=REPEAT_Q_SQUAD_DATA_DIR,
                  restore_supervised_checkpoint=False,
+                 supervised_model_checkpoint_path=None,
                  supervised_epochs=6,
-                 dev_step_size=100):
+                 dev_step_size=100,
+                 learning_rate=None,
+                 saving_model=False):
         super(ModelConfiguration, self).__init__()
         self.recurrent_dropout = recurrent_dropout
         self.fact_encoder_hidden_size = fact_encoder_hidden_size
@@ -39,9 +40,12 @@ class ModelConfiguration:
         self.decoder_readout_size = decoder_readout_size
         self.batch_size = batch_size
         self.restore_supervised_checkpoint = restore_supervised_checkpoint
+        self.supervised_model_checkpoint_path = supervised_model_checkpoint_path
         self.supervised_epochs = supervised_epochs
         self.epochs = nb_epochs
         self.dev_step_size = dev_step_size
+        self.learning_rate = learning_rate
+        self.saving_model = saving_model
 
     @staticmethod
     def new() -> 'ModelConfiguration':
@@ -52,8 +56,20 @@ class ModelConfiguration:
         self.batch_size = batch_size
         return self
 
+    def with_learning_rate(self, learning_rate):
+        self.learning_rate = learning_rate
+        return self
+
     def with_restore_supervised_checkpoint(self):
         self.restore_supervised_checkpoint = True
+        return self
+
+    def with_supervised_model_checkpoint_path(self, ckpt_path):
+        self.supervised_model_checkpoint_path = ckpt_path
+        return self
+
+    def with_saving_model(self, save_model: bool):
+        self.saving_model = save_model
         return self
 
     def with_supervised_epochs(self, nb_epochs):
