@@ -10,15 +10,14 @@ from tqdm import tqdm
 
 from data_processing.repeat_q_dataset import RepeatQDataset
 from defs import UNKNOWN_TOKEN, REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_RAW_DATASETS, GLOVE_PATH, PAD_TOKEN, \
-    REPEAT_Q_EMBEDDINGS_FILENAME, REPEAT_Q_VOCABULARY_FILENAME, REPEAT_Q_DATA_DIR, EOS_TOKEN, TRAINED_MODELS_DIR, \
-    REPEAT_Q_TRAIN_CHECKPOINTS_DIR
+    REPEAT_Q_EMBEDDINGS_FILENAME, REPEAT_Q_VOCABULARY_FILENAME, REPEAT_Q_DATA_DIR, EOS_TOKEN, \
+    REPEAT_Q_TRAIN_CHECKPOINTS_DIR, REPEAT_Q_SQUAD_OUTPUT_FILEPATH
 from models.RepeatQ.model import RepeatQ
 from models.RepeatQ.model_config import ModelConfiguration
-from models.RepeatQ.rl.environment import RepeatQEnvironment
 from models.RepeatQ.trainer import RepeatQTrainer
 
 
-def make_tf_dataset(base_questions, facts_list, targets, batch_size=1):
+def make_tf_dataset(base_questions, facts_list, targets, batch_size=1, shuffle=True):
     def _gen():
         for base_question, facts, target in zip(base_questions, facts_list, targets):
             yield ({
@@ -26,12 +25,11 @@ def make_tf_dataset(base_questions, facts_list, targets, batch_size=1):
                        "base_question": base_question
                    }, target)
 
-    return tf.data.Dataset \
-        .from_generator(_gen, output_types=({
-                                                "facts": tf.int32, "base_question": tf.int32
-                                            }, tf.int32)) \
-        .shuffle(buffer_size=len(base_questions), reshuffle_each_iteration=True) \
-        .batch(batch_size=batch_size, drop_remainder=True)
+    ds = tf.data.Dataset \
+        .from_generator(_gen, output_types=({"facts": tf.int32, "base_question": tf.int32}, tf.int32))
+    if shuffle:
+        ds = ds.shuffle(buffer_size=len(base_questions), reshuffle_each_iteration=True)
+    return ds.batch(batch_size=batch_size, drop_remainder=True)
 
 
 def get_data(data_dir, vocabulary, data_limit, batch_size):
@@ -43,7 +41,7 @@ def get_data(data_dir, vocabulary, data_limit, batch_size):
             vocabulary,
             data_limit=data_limit
         ).get_dataset()
-        datasets[mode] = make_tf_dataset(base_questions, facts, targets, batch_size=batch_size)
+        datasets[mode] = make_tf_dataset(base_questions, facts, targets, batch_size=batch_size, shuffle=mode != "test")
     info("Done.")
     return datasets
 
@@ -79,6 +77,10 @@ def train(data_dir, data_limit, batch_size, learning_rate, epochs, supervised_ep
 
 def translate(model_dir, data_dir):
     config = ModelConfiguration.new().with_batch_size(1)
+    
+    save_path = REPEAT_Q_SQUAD_OUTPUT_FILEPATH
+    if not os.path.exists(os.path.dirname(save_path)):
+        os.makedirs(os.path.dirname(save_path))
     vocabulary = build_vocabulary(config.vocabulary_path)
     reverse_voc = {v: k for k, v in vocabulary.items()}
     data = get_data(data_dir=data_dir, vocabulary=vocabulary, data_limit=-1, batch_size=config.batch_size)["test"]
@@ -88,11 +90,12 @@ def translate(model_dir, data_dir):
     def to_string(tokens):
         return " ".join([reverse_voc[t] for t in tokens if t != 0])
     
-    for feature, label in data:
-        print("Target: " + to_string(label[0].numpy()))
-        translated = model.infer(feature)
-        print("Hypothesis: " + to_string(translated) + "\n")
-        
+    with open(save_path, mode='w') as pred_file:
+        for feature, label in tqdm(data):
+            translated = to_string(model.infer(feature, beam_search_size=1).numpy())
+            tf.print(translated)
+            pred_file.write(translated + "\n")
+
 
 def create_embedding_matrix(pretrained_path, vocab, pad_token, unk_token):
     embeddings = [None for _ in range(len(vocab))]

@@ -33,6 +33,8 @@ class RepeatQDataset:
     def read_dataset(self, data_limit):
         with open(self.ds_path, mode='r') as f:
             data = RepeatQExample.from_json(json.load(f))
+            if data_limit < 0:
+                return data
             return data[:data_limit]
 
     def get_dataset(self):

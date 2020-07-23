@@ -144,56 +144,102 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         all_logits = tf.transpose(all_logits.stack()[:ite], perm=[1, 0, 2])
         return actions, all_logits
 
+    @tf.function
     def infer(self, inputs, beam_search_size=5):
         base_question = inputs["base_question"]
         facts = inputs["facts"]
-        network_states = [self.get_initial_state(base_question, facts, training=False) for _ in range(beam_search_size)]
-        beams = [[] for _ in range(beam_search_size)]
-        beam_probs = [0.0 for _ in range(beam_search_size-1)] + [1.0]
-        it = 0
 
-        def not_finished(beam):
-            return beam[-1] != self.question_mark_id and beam[-1] != 0
-        while (it == 0 or any(not_finished(beam) for beam in beams)) and \
-                it < self.config.max_generated_question_length:
+        # Initialize variables
+        initial_network_state = self.get_initial_state(base_question, facts, training=False)
+        base_question_embeddings = initial_network_state.base_question_embeddings
+        facts_encodings = initial_network_state.facts_encodings
+        decoder_states = tf.stack([tf.stack(initial_network_state.decoder_states) for _ in range(beam_search_size)])
+        observations = tf.stack([initial_network_state.observation for _ in range(beam_search_size)])
+        beams = tf.zeros(shape=(beam_search_size, 1), dtype=tf.int32)
+        beam_probs = tf.concat((tf.zeros(shape=(beam_search_size-1,)), [1.0]), axis=0)
+        first_step = tf.constant(True)
+        it = tf.constant(0)
+
+        best_beam = tf.constant([], dtype=tf.int32, name="best_beam")
+        best_beam_prob = tf.constant(0.0, dtype=tf.float32, name="best_beam_prob")
+
+        def not_finished(_beams, beam_index=None):
+            def _beam_finished(_beam):
+                return tf.logical_and(tf.not_equal(_beam[-1], self.question_mark_id), tf.not_equal(_beam[-1], 0))
+            if beam_index is not None:
+                return _beam_finished(_beams[beam_index])
+            return tf.reduce_any([_beam_finished(_beams[i]) for i in range(beam_search_size)])
+
+        while tf.logical_and(tf.logical_or(it == 0, not_finished(beams)), it < self.config.max_generated_question_length):
+            tf.autograph.experimental.set_loop_options(
+                shape_invariants=[
+                    (beams, tf.TensorShape([beam_search_size, None])),
+                    (best_beam, tf.TensorShape([None])),
+                    (observations, tf.TensorShape([None, 1])),
+                    (decoder_states, tf.TensorShape([None, 2, 1, self.config.decoder_hidden_size]))
+                ]
+            )
             probs = tf.TensorArray(size=beam_search_size, dtype=tf.float32)
-            preds = tf.TensorArray(size=beam_search_size, dtype=tf.int32)
-            new_states = []
-            for i in range(beam_search_size):
-                if it == 0 or not_finished(beams[i]):
-                    logits, decoder_state = self(network_states[i], training=False)
-                    top_probs, top_words = tf.math.top_k(tf.squeeze(tf.math.softmax(logits, axis=-1)), k=beam_search_size)
-                    probs = probs.write(i, top_probs.numpy() * beam_probs[i])
-                    top_words = top_words.numpy()
-                    if it == 0:
-                        prospects = [[top_word] for top_word in top_words]
-                    else:
-                        prospects = [np.concatenate((beams[i], [top_words[i]])) for i in range(beam_search_size)]
-                    preds = preds.write(i, prospects)
-                    new_states.extend([RepeatQ.NetworkState(
-                        base_question_embeddings=network_states[i].base_question_embeddings,
-                        facts_encodings=network_states[i].facts_encodings,
-                        decoder_states=decoder_state,
-                        observation=[observation],
-                        is_first_step=False
-                    ) for observation in top_words])
-                else:
-                    preds = preds.write(
-                        i,
-                        tf.repeat(tf.expand_dims(
-                            np.concatenate((beams[i], np.zeros(shape=(1,), dtype=np.int32)), axis=0), axis=0),
-                            repeats=beam_search_size, axis=0)
+            dec_states = tf.zeros(shape=(0, 2, 1, self.config.decoder_hidden_size), dtype=tf.float32)
+            new_observations = tf.zeros(shape=(0, 1), dtype=tf.int32)
+            new_beams = tf.zeros(shape=(0, 0), dtype=tf.int32)
+            for i in tf.range(tf.shape(beams)[0]):
+                tf.autograph.experimental.set_loop_options(
+                    shape_invariants=[
+                        (new_beams, tf.TensorShape([None, None])),
+                        (dec_states, tf.TensorShape([None, 2, 1, self.config.decoder_hidden_size])),
+                        (new_observations, tf.TensorShape([None, 1]))
+                    ]
+                )
+                beam_network_state = RepeatQ.NetworkState(
+                        base_question_embeddings=base_question_embeddings,
+                        facts_encodings=facts_encodings,
+                        decoder_states=tuple(tf.unstack(decoder_states[i])),
+                        observation=observations[i],
+                        is_first_step=first_step
+                )
+                if tf.logical_or(tf.equal(it, 0), not_finished(beams, i)):
+                    logits, decoder_state = self(beam_network_state, training=False)
+                    top_probs, top_words = tf.math.top_k(
+                        tf.squeeze(tf.math.softmax(logits, axis=-1)),
+                        k=beam_search_size
                     )
-                    probs = probs.write(i, tf.repeat(beam_probs[i], repeats=beam_search_size))
-                    new_states.extend([network_states[i] for _ in range(beam_search_size)])
-            probs = tf.reshape(probs.stack(), shape=(-1))
-            preds = tf.reshape(preds.stack(), shape=(beam_search_size*beam_search_size, -1))
+                    top_probs = top_probs * beam_probs[i]
+                    probs = probs.write(i, top_probs)
+                    if it == 0:
+                        new_beam = tf.expand_dims(top_words, axis=1)
+                    else:
+                        beam_repeated = tf.repeat(tf.expand_dims(beams[i], axis=0), repeats=beam_search_size, axis=0)
+                        new_beam = tf.concat((beam_repeated, tf.expand_dims(top_words, axis=1)), axis=1)
+
+                    if tf.size(new_beams) == 0:
+                        dec_states = tf.repeat(tf.expand_dims(decoder_state, axis=0), repeats=beam_search_size, axis=0)
+                        new_observations = tf.expand_dims(top_words, axis=1)
+                        new_beams = new_beam
+                    else:
+                        decoder_state = tf.repeat(tf.expand_dims(tf.stack(decoder_state), axis=0),
+                                                  repeats=beam_search_size, axis=0)
+                        dec_states = tf.concat((dec_states, decoder_state), axis=0)
+                        new_observations = tf.concat((new_observations, tf.expand_dims(top_words, axis=1)), axis=0)
+                        new_beams = tf.concat((new_beams, new_beam), axis=0)
+                else:
+                    # For finished beams, save the most promising one if it's better than the current best
+                    if beam_probs[i] > best_beam_prob:
+                        best_beam_prob = beam_probs[i]
+                        best_beam = beams[i]
+
+            probs = probs.stack()
+            probs = tf.reshape(probs, shape=(-1,))
+            beams = new_beams
             beam_probs, idx = tf.math.top_k(probs, k=beam_search_size)
-            beams = tf.gather(preds, idx).numpy()
-            network_states = [new_states[i] for i in idx]
+            beams = tf.gather(beams, idx)
+            decoder_states = tf.gather(dec_states, idx)
+            observations = tf.gather(new_observations, idx)
+            first_step = tf.constant(False)
             it += 1
-        max_beam_index = tf.argmax(beam_probs, axis=0)
-        return beams[max_beam_index]
+        if best_beam_prob > tf.reduce_max(beam_probs):
+            return best_beam
+        return beams[tf.argmax(beam_probs, axis=0)]
 
     def get_initial_state(self, base_question, facts, training=True):
         base_question_embeddings = self.embedding_layer(base_question)
