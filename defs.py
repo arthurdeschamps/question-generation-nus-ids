@@ -4,6 +4,7 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 MODELS_DIR = f"{ROOT_DIR}/models"
 NQG_MODEL_DIR = f"{MODELS_DIR}/nqg"
+REPEAT_Q_MODEL_DIR = f"{MODELS_DIR}/repeat_q"
 
 DATA_DIR = f"{ROOT_DIR}/data"
 PROCESSED_DATA_DIR = f"{DATA_DIR}/processed"
@@ -12,6 +13,11 @@ NQG_DATA_HOME = f"{PROCESSED_DATA_DIR}/nqg"
 SQUAD_DIR = f"{DATA_DIR}/squad_dataset"
 SQUAD_TRAIN = f"{SQUAD_DIR}/train-v1.1.json"
 SQUAD_DEV = f"{SQUAD_DIR}/dev-v1.1.json"
+
+SQUAD_FACTS_TRAIN = f"{SQUAD_DIR}/train_filtered"
+SQUAD_REWRITES_TRAIN = f"{SQUAD_DIR}/train_rewrites"
+SQUAD_FACTS_DEV = f"{SQUAD_DIR}/dev_filtered"
+SQUAD_REWRITES_DEV = f"{SQUAD_DIR}/dev_rewrites"
 
 MEDQUAD_DIR = f"{DATA_DIR}/medquad_dataset"
 MEDQUAD_RAW_DIR = f"{MEDQUAD_DIR}/MedQuAD_raw"
@@ -67,3 +73,17 @@ ASS2S_PROVIDED_PROCESSED_DATA_DIR = f"{ASS2S_DIR}/data/processed/mpqg_substitute
 ASS2S_PROCESSED_DIR = f"{PROCESSED_DATA_DIR}/ass2s"
 ASS2S_PROCESSED_SQUAD_DIR = f"{ASS2S_PROCESSED_DIR}/squad/mpqg_substitute_a_vocab_include_a"
 ASS2S_PROCESSED_SQUAD_MPQG_DATA = f"{ASS2S_PROCESSED_DIR}/squad/mpqg_data"
+
+# RepeatQ related definitions
+REPEAT_Q_DATA_DIR = f"{PROCESSED_DATA_DIR}/repeat_q"
+REPEAT_Q_RAW_DATASETS = f"{REPEAT_Q_DATA_DIR}/raw_datasets"
+PAD_TOKEN = "<blank>"
+UNKNOWN_TOKEN = "<unk>"
+EOS_TOKEN = "<eos>"
+
+REPEAT_Q_PREDS_OUTPUT_DIR = f"{RESULTS_DIR}/repeat_q"
+REPEAT_Q_SQUAD_OUTPUT_FILEPATH = f"{REPEAT_Q_PREDS_OUTPUT_DIR}/prediction.txt"
+REPEAT_Q_SQUAD_DATA_DIR = f"{REPEAT_Q_DATA_DIR}/squad"
+REPEAT_Q_EMBEDDINGS_FILENAME = "embeddings.npy"
+REPEAT_Q_VOCABULARY_FILENAME = "vocabulary.txt"
+REPEAT_Q_TRAIN_CHECKPOINTS_DIR = f"{TRAINED_MODELS_DIR}/repeat_q"

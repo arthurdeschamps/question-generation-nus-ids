@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import List, Dict
+from typing import List, Dict, Optional
 import nltk
 
 
@@ -79,6 +79,21 @@ class SquadMultiQAExample(JsonParsable):
                 qas.append(QAsExample(question, answers))
             squad_multi_examples.append(SquadMultiQAExample(context, qas))
         return squad_multi_examples
+
+
+class RepeatQExample(JsonParsable):
+
+    def __init__(self, base_question: str, facts: List[str], rephrased_question: Optional[str], *args, **kwargs):
+        super(RepeatQExample, self).__init__(*args, **kwargs)
+        self.base_question = base_question
+        self.facts = facts
+        self.rephrased_question = rephrased_question
+
+    @staticmethod
+    def from_json(json) -> List['RepeatQExample']:
+        return [RepeatQExample(
+            base_question=example["base_question"], facts=example["facts"], rephrased_question=example["target"]
+        ) for example in json]
 
 
 class SquadExample(QAExample, JsonParsable):

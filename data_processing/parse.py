@@ -1,3 +1,4 @@
+import ast
 import json
 import logging
 import random
@@ -16,12 +17,11 @@ import os
 from data_processing.class_defs import QAExample
 
 
-def read_squad_dataset(dataset_path: str, limit=-1, break_up_paragraphs=True):
+def read_squad_dataset(dataset_path: str, example_cls=SquadExample, limit=-1):
     """
     Loads a squad dataset (json format) from the given path.
-    :param break_up_paragraphs: If the "context" fields should only contain the sentences where the answer spans, or
-    the full paragraph.
     :param dataset_path: Path to a json formatted SQuAD dataset.
+    :param example_cls: Class of the examples to parse.
     :param limit: Limit to the number of paragraphs to load.
     :return: A list of SquadExample objects.
     """
@@ -30,11 +30,7 @@ def read_squad_dataset(dataset_path: str, limit=-1, break_up_paragraphs=True):
     squad_examples = []
     logging.info("Read squad examples...")
     for i, examples in tqdm(enumerate(ds)):
-        if break_up_paragraphs:
-            squad_example_class = SquadExample
-        else:
-            squad_example_class = SquadMultiQAExample
-        squad_examples.extend(squad_example_class.from_json(examples))
+        squad_examples.extend(example_cls.from_json(examples))
         if i == limit:
             break
     return squad_examples
@@ -121,3 +117,99 @@ def read_qa_dataset(ds_path: str, limit=-1) -> List[QAExample]:
             answer=Answer(text=datapoint['answer'], answer_start=0)
         ))
     return exs
+
+
+def next_chunk(file_reader):
+    next_content = None
+    next_line = file_reader.readline()
+    while next_line and next_line == "\n":
+        next_line = file_reader.readline()
+    while next_line and next_line != "\n":
+        next_line = next_line.strip()
+        if next_content is None:
+            next_content = [next_line]
+        else:
+            next_content.append(next_line)
+        next_line = file_reader.readline()
+    return next_content, next_line
+
+
+def read_squad_facts_files(facts_dirpath):
+    fact_dataset = {}
+    assert os.path.isdir(facts_dirpath)
+    print(f"Parsing {facts_dirpath}...")
+    for filename in tqdm(os.listdir(facts_dirpath)):
+        if "facts" in filename:
+            passage_facts = []
+            passage_id = int(filename.replace("facts.", "").replace(".txt", ""))
+            with open(os.path.join(facts_dirpath, filename), mode='r') as f:
+                last_line = ""
+                while last_line is not None:
+                    next_content, last_line = next_chunk(f)
+                    if next_content is None:
+                        break
+                    fact_id = next_content[0]
+                    g_type = next_content[1]
+                    g_name = next_content[2]
+                    g_description = next_content[3]
+                    g_article_text = next_content[4]
+
+                    fields_with_keys_and_renamed_keys = zip(
+                        [fact_id, g_type, g_name, g_description, g_article_text],
+                        ["FACTID", "GKGTYPE", "GKGNAME", "GKGDESC", "GKGARTTEXT"],
+                        ["fact_id", "type", "name", "description", "text"]
+                    )
+                    fact = {}
+                    for field, key, renamed_key in fields_with_keys_and_renamed_keys:
+                        assert key in field
+                        fact[renamed_key] = field.replace(key, "").strip()
+                    passage_facts.append(fact)
+
+            fact_dataset[passage_id] = passage_facts
+    return fact_dataset
+
+
+def read_squad_rewrites_files(rewrites_dirpath):
+    assert os.path.isdir(rewrites_dirpath)
+    rewrites = {}
+    print(f"Parsing {rewrites_dirpath}...")
+    for filename in tqdm(os.listdir(rewrites_dirpath)):
+        if "qw" in filename and "old" not in filename:
+            passage_rewrites = []
+            passage_id = int(filename.replace("qw.", "").replace(".list", ""))
+            with open(os.path.join(rewrites_dirpath, filename), mode='r') as f:
+                next_line = ""
+                while next_line is not None:
+                    next_content, next_line = next_chunk(f)
+                    if next_content is None:
+                        break
+                    base_question = next_content[0]
+                    # Some questions have more than one rewrites, we create one example per rewrite
+                    rewritten_questions = next_content[1:]
+                    for rewritten_question in rewritten_questions:
+                        passage_rewrites.append({
+                            "base_question": base_question,
+                            "rephrased": rewritten_question
+                        })
+            rewrites[passage_id] = passage_rewrites
+    return rewrites
+
+
+def read_squad_qmap_files(qmap_dirpath):
+    assert os.path.isdir(qmap_dirpath)
+    question_to_facts = {}
+    for filename in tqdm(os.listdir(qmap_dirpath)):
+        if "qmap" in filename:
+            passage_id = int(filename.replace("qmap.", "").replace(".txt", ""))
+            q_maps = {}
+            with open(os.path.join(qmap_dirpath, filename), mode='r') as f:
+                next_line = ""
+                while next_line is not None:
+                    next_content, next_line = next_chunk(f)
+                    if next_content is None:
+                        break
+                    question = next_content[0].replace("QUESTION ", "")
+                    fact_ids = ast.literal_eval(next_content[1].replace("facts ", ""))
+                    q_maps[question] = fact_ids
+            question_to_facts[passage_id] = q_maps
+    return question_to_facts

@@ -3,16 +3,22 @@ import os
 import pathlib
 import shutil
 import subprocess
+from logging import info, warning, debug
+
 import pandas as pd
 import nltk
 import stanza
+from tqdm import tqdm
 
 from data_processing.mpqg_dataset import MPQGDataset
-from data_processing.parse import read_medquad_raw_dataset
+from data_processing.parse import read_medquad_raw_dataset, read_squad_dataset, read_squad_facts_files, \
+    read_squad_rewrites_files, read_squad_qmap_files
 from data_processing.utils import array_to_string
 from defs import NQG_MODEL_DIR, NQG_DATA_HOME, MEDQUAD_DIR, MEDQUAD_DEV, MEDQUAD_TRAIN, \
-    MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_DIR, MEDQA_HANDMADE_RAW_DATASET_FILEPATH, HOTPOT_QA_DEV_JSON, \
-    HOTPOT_QA_DEV_TARGETS_PATH, ASS2S_PROCESSED_SQUAD_DIR, ASS2S_PROCESSED_SQUAD_MPQG_DATA
+    MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_RAW_DATASET_FILEPATH, HOTPOT_QA_DEV_JSON, \
+    HOTPOT_QA_DEV_TARGETS_PATH, \
+    REPEAT_Q_RAW_DATASETS, SQUAD_FACTS_TRAIN, SQUAD_FACTS_DEV, SQUAD_REWRITES_DEV, SQUAD_REWRITES_TRAIN, \
+    ASS2S_PROCESSED_SQUAD_MPQG_DATA
 from data_processing.nqg_dataset import NQGDataset
 from data_processing.pre_processing import NQGDataPreprocessor
 import numpy as np
@@ -257,6 +263,53 @@ def generate_hotpot_targets(json_data_path, savepath):
     np.savetxt(savepath, targets, fmt="%s", delimiter="\n", comments=None)
 
 
+def generate_repeat_q_squad_raw():
+    os.environ["CUDA_VISIBLE_DEVICES"] = "8"
+    #tokenize = stanza.Pipeline(lang='en', processors='tokenize')
+    tokenize = nltk.word_tokenize
+
+    facts_train = read_squad_facts_files(facts_dirpath=SQUAD_FACTS_TRAIN)
+    rewrites_train = read_squad_rewrites_files(rewrites_dirpath=SQUAD_REWRITES_TRAIN)
+    question_to_facts_map_train = read_squad_qmap_files(qmap_dirpath=SQUAD_FACTS_TRAIN)
+    facts_dev = read_squad_facts_files(facts_dirpath=SQUAD_FACTS_DEV)
+    rewrites_dev = read_squad_rewrites_files(rewrites_dirpath=SQUAD_REWRITES_DEV)
+    question_to_facts_map_dev = read_squad_qmap_files(qmap_dirpath=SQUAD_FACTS_DEV)
+
+    ds = []
+
+    def _make_example(_base_question, _rewritten_question, _facts, _passage_id):
+        # Create example placeholders and filter out irrelevant question words for future word matching
+        def _tokenize(sentence):
+            return " ".join(tokenize(sentence)).lower()
+        tokenized_question = _tokenize(base_question)
+        target = _tokenize(_rewritten_question)
+        tokenized_facts = [_tokenize(fact["text"]) for fact in _facts]
+        example = {
+            "base_question": tokenized_question,
+            "facts": tokenized_facts,
+            "target": target,
+            "passage_id": _passage_id
+        }
+        return example
+
+    for question_to_facts_map, rewrites, facts, ds_type in [
+        (question_to_facts_map_dev, rewrites_dev, facts_dev, "test"),
+        (question_to_facts_map_train, rewrites_train, facts_train, "train")
+    ]:
+        for passage_id in tqdm(list(question_to_facts_map.keys())):
+            questions = rewrites[passage_id]
+            question_to_facts = question_to_facts_map[passage_id]
+            for question in questions:
+                base_question = question["base_question"]
+                rephrased = question["rephrased"]
+                if base_question in question_to_facts:
+                    fact_ids = question_to_facts[base_question]
+                    passage_facts = [facts[passage_id][fact_id] for fact_id in fact_ids]
+                    ds.append(_make_example(base_question, rephrased, passage_facts, passage_id))
+        with open(f"{REPEAT_Q_RAW_DATASETS}/squad_{ds_type}.json", mode='w') as f:
+            json.dump(ds, f)
+
+
 if __name__ == '__main__':
     import argparse
 
@@ -293,6 +346,9 @@ if __name__ == '__main__':
     elif args.dataset_name == "nqg_hotpotqa":
         generate_nqg_features('dev', 'hotpotqa')
         generate_nqg_features('train', 'hotpotqa')
+    elif args.dataset_name == "repeat_q_squad":
+        generate_repeat_q_squad_raw()
+        info("Raw SQuAD dataset for RepeatQ generated.")
     else:
         raise ValueError("Non-existing dataset type")
     print("Done")

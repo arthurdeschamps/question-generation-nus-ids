@@ -21,24 +21,12 @@ class NQGDataset(Dataset):
             self.nb_words = nb_words
             self.text = text
 
-    def __init__(self, break_up_paragraphs=True, *args, mode="train", **kwargs):
+    def __init__(self, *args, mode="train", **kwargs):
         if mode not in ("train", "dev"):
             raise ValueError("Mode should be either 'train' or 'dev'")
         super(NQGDataset, self).__init__(*args, mode=mode, **kwargs)
         stanza.download('en')
         self.nlp = stanza.Pipeline('en', processors='tokenize,pos,ner')
-        self.datatype = QAExample
-        if self.dataset_name == "squad":
-            self.datatype = SquadExample
-            self.ds = read_squad_dataset(
-                self.datapath,
-                limit=self.data_limit,
-                break_up_paragraphs=break_up_paragraphs
-            )
-        elif self.dataset_name in ("medquad", "medqa_handmade"):
-            self.ds = read_qa_dataset(self.datapath, limit=self.data_limit)
-        else:
-            raise NotImplementedError()
 
     def get_dataset(self) -> Tuple[List[Document], List[Answer], List[str]]:
         contexts = []

@@ -1,3 +1,5 @@
+import json
+
 from evaluating.rouge_score import rouge_l_sentence_level as rouge_l
 import nltk.translate.bleu_score as bleu
 from nltk.translate.meteor_score import meteor_score as meteor
@@ -8,7 +10,7 @@ from defs import NQG_MEDQUAD_DATASET, NQG_MEDQUAD_PREDS_OUTPUT_PATH, NQG_SQUAD_P
     NQG_SQUAD_GA_PREDS_OUTPUT_PATH, NQG_SQUAD_NA_PREDS_OUTPUT_PATH, NQG_SQUAD_NER_PREDS_OUTPUT_PATH, \
     NQG_SQUAD_DATASET, NQG_SQUAD_NER_DATASET, NQG_SQUAD_TESTGA_PREDS_OUTPUT_PATH, SG_DQG_HOTPOT_PREDS_PATH, \
     HOTPOT_QA_DEV_TARGETS_PATH, ASS2S_SQUAD_PREDS_OUTPUT_PATH, ASS2S_PROVIDED_PROCESSED_DATA_DIR, \
-    ASS2S_PROCESSED_SQUAD_MPQG_DATA, ASS2S_PROCESSED_SQUAD_DIR, SG_DQG_SQUAD_PREDS_PATH
+    REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_SQUAD_OUTPUT_FILEPATH, ASS2S_PROCESSED_SQUAD_DIR, SG_DQG_SQUAD_PREDS_PATH
 from mytools import remove_adjacent_duplicate_grams
 
 
@@ -86,7 +88,7 @@ if __name__ == '__main__':
 
     models = (
         "nqg_squad", "nqg_squad_ga", "nqg_squad_na", "nqg_squad_ner", "nqg_medquad", "nqg_squad_testga",
-        "sg_dqg_hotpotqa", "ass2s_squad", "sg_dqg_squad"
+        "sg_dqg_hotpotqa", "ass2s_squad", "sg_dqg_squad", "repeat_q_squad"
     )
 
     import argparse
@@ -158,4 +160,12 @@ if __name__ == '__main__':
             ).reshape((-1, 1))
             assert candidates.shape[0] == references.shape[0]
 
+    elif "repeat_q" in model:
+        if model == "repeat_q_squad":
+            with open(f"{REPEAT_Q_SQUAD_DATA_DIR}/test.data.json", mode='r') as test_file:
+                test_data = json.load(test_file)
+            references = np.array([d["target"] for d in test_data if len(d["target"]) > 0]).reshape((-1, 1))
+            candidates = np.array(pd.read_csv(
+                REPEAT_Q_SQUAD_OUTPUT_FILEPATH, header=None, sep='\n', comment=None)
+            ).reshape((-1,))
     benchmark(candidates, references)
