@@ -54,13 +54,15 @@ def build_vocabulary(vocabulary_path):
     return token_to_id
 
 
-def train(data_dir, data_limit, batch_size, learning_rate, epochs, supervised_epochs, checkpoint_name, save_model):
+def train(data_dir, data_limit, batch_size, learning_rate, epochs, supervised_epochs, checkpoint_name, save_model, 
+          nb_episodes):
     config = ModelConfiguration.new()\
         .with_batch_size(batch_size)\
         .with_supervised_epochs(0)\
         .with_epochs(epochs)\
         .with_supervised_epochs(supervised_epochs)\
-        .with_saving_model(save_model)
+        .with_saving_model(save_model)\
+        .with_episodes(nb_episodes)
     info(str(config))
     if learning_rate is not None:
         config = config.with_learning_rate(learning_rate)
@@ -92,7 +94,7 @@ def translate(model_dir, data_dir):
     
     with open(save_path, mode='w') as pred_file:
         for feature, label in tqdm(data):
-            translated = to_string(model.infer(feature, beam_search_size=1).numpy())
+            translated = to_string(model.beam_search(feature, beam_search_size=5).numpy())
             tf.print(translated)
             pred_file.write(translated + "\n")
 
@@ -237,6 +239,8 @@ if __name__ == '__main__':
                         help="Number of epochs to train the model in supervised mode for. The rest of the epochs"
                              "will be spent training in RL mode.")
     parser.add_argument("-nb_epochs", type=int, default=20, help="Total number of epochs to train for.", required=False)
+    parser.add_argument("-nb_episodes", type=int, default=32, help="Number of episodes to collect per policy gradient"
+                                                                   " iteration.", required=False)
     parser.add_argument("-model_checkpoint_name", type=str, required=False, default=None,
                         help="Name of a checkpoint of the model to resume from. When in translate mode, the model"
                              "will be loaded and directly used to make predictions. When in train or train_rl mode,"
@@ -253,7 +257,8 @@ if __name__ == '__main__':
             epochs=args.nb_epochs,
             supervised_epochs=args.supervised_epochs,
             checkpoint_name=args.model_checkpoint_name,
-            save_model=args.save_model
+            save_model=args.save_model,
+            nb_episodes=args.nb_episodes
         )
         info("Training completed.")
     elif args.action == "preprocess":

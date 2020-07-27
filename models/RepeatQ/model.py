@@ -75,6 +75,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
     @tf.function
     def get_actions(self, inputs, target, training, phase):
         from models.RepeatQ.trainer import RepeatQTrainer
+        batch_size = target.get_shape()[0]
         finished = tf.fill(dims=(tf.shape(target)[0],), value=False)
 
         if phase == RepeatQTrainer.supervised_phase:
@@ -84,8 +85,8 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         else:
             raise NotImplementedError()
 
-        base_question, facts = inputs[0], inputs[1]
-        network_state = self.get_initial_state(base_question, facts)
+        base_question, facts = inputs["base_question"], inputs["facts"]
+        network_state = self.get_initial_state(base_question, facts, batch_size)
 
         all_logits = tf.TensorArray(dtype=tf.float32, size=size, name="logits")
         actions = tf.TensorArray(dtype=tf.int32, size=size, name="agent_actions")
@@ -100,15 +101,16 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         while _continue_loop(ite, finished):
             logits, decoder_states = self(network_state, training=training)
             probs = tf.math.softmax(logits, axis=-1, name="probs")
+            predicted_tokens = tf.argmax(probs, axis=-1, output_type=tf.int32, name="pred_tokens")
             if phase == RepeatQTrainer.reinforce_phase and training:
                 predicted_tokens = \
                     tf.where(
                         finished,
-                        tf.zeros(shape=(self.config.batch_size,), dtype=tf.int32),
-                        tf.squeeze(tf.random.categorical(logits, num_samples=1, dtype=tf.int32), axis=1)
+                        tf.zeros(shape=(batch_size,), dtype=tf.int32),
+                        predicted_tokens
                     )
-            else:
-                predicted_tokens = tf.argmax(probs, axis=-1, output_type=tf.int32, name="pred_tokens")
+                predicted_tokens.set_shape(shape=(batch_size,))
+
             actions = actions.write(ite, predicted_tokens)
             all_logits = all_logits.write(ite, logits)
 
@@ -138,19 +140,21 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
                 )
             else:
                 raise NotImplementedError()
-            finished.set_shape(shape=(self.config.batch_size,))
+            finished.set_shape(shape=(batch_size,))
         # Switch from time major to batch major
         actions = tf.transpose(actions.stack()[:ite])
         all_logits = tf.transpose(all_logits.stack()[:ite], perm=[1, 0, 2])
         return actions, all_logits
 
     @tf.function
-    def infer(self, inputs, beam_search_size=5):
+    def beam_search(self, inputs, beam_search_size=5):
         base_question = inputs["base_question"]
         facts = inputs["facts"]
 
         # Initialize variables
-        initial_network_state = self.get_initial_state(base_question, facts, training=False)
+        initial_network_state = self.get_initial_state(
+            base_question, facts, batch_size=base_question.get_shape()[0], training=False
+        )
         base_question_embeddings = initial_network_state.base_question_embeddings
         facts_encodings = initial_network_state.facts_encodings
         decoder_states = tf.stack([tf.stack(initial_network_state.decoder_states) for _ in range(beam_search_size)])
@@ -163,12 +167,17 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         best_beam = tf.constant([], dtype=tf.int32, name="best_beam")
         best_beam_prob = tf.constant(0.0, dtype=tf.float32, name="best_beam_prob")
 
+        size = beam_search_size ** 2
+        new_probs = tf.TensorArray(size=size, dtype=tf.float32)
+        dec_states = tf.TensorArray(size=size, dtype=tf.float32)
+        new_observations = tf.TensorArray(size=size, dtype=tf.int32)
+
         def not_finished(_beams, beam_index=None):
-            def _beam_finished(_beam):
+            def _beam_not_finished(_beam):
                 return tf.logical_and(tf.not_equal(_beam[-1], self.question_mark_id), tf.not_equal(_beam[-1], 0))
             if beam_index is not None:
-                return _beam_finished(_beams[beam_index])
-            return tf.reduce_any([_beam_finished(_beams[i]) for i in range(beam_search_size)])
+                return _beam_not_finished(_beams[beam_index])
+            return tf.reduce_any([_beam_not_finished(_beams[i]) for i in range(beam_search_size)])
 
         while tf.logical_and(tf.logical_or(it == 0, not_finished(beams)), it < self.config.max_generated_question_length):
             tf.autograph.experimental.set_loop_options(
@@ -179,18 +188,9 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
                     (decoder_states, tf.TensorShape([None, 2, 1, self.config.decoder_hidden_size]))
                 ]
             )
-            probs = tf.TensorArray(size=beam_search_size, dtype=tf.float32)
-            dec_states = tf.zeros(shape=(0, 2, 1, self.config.decoder_hidden_size), dtype=tf.float32)
-            new_observations = tf.zeros(shape=(0, 1), dtype=tf.int32)
-            new_beams = tf.zeros(shape=(0, 0), dtype=tf.int32)
+            new_beams = tf.zeros(shape=(size, 0), dtype=tf.int32)
             for i in tf.range(tf.shape(beams)[0]):
-                tf.autograph.experimental.set_loop_options(
-                    shape_invariants=[
-                        (new_beams, tf.TensorShape([None, None])),
-                        (dec_states, tf.TensorShape([None, 2, 1, self.config.decoder_hidden_size])),
-                        (new_observations, tf.TensorShape([None, 1]))
-                    ]
-                )
+                tf.autograph.experimental.set_loop_options(shape_invariants=[(new_beams, tf.TensorShape([None, None]))])
                 beam_network_state = RepeatQ.NetworkState(
                         base_question_embeddings=base_question_embeddings,
                         facts_encodings=facts_encodings,
@@ -205,43 +205,47 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
                         k=beam_search_size
                     )
                     top_probs = top_probs * beam_probs[i]
-                    probs = probs.write(i, top_probs)
                     if it == 0:
                         new_beam = tf.expand_dims(top_words, axis=1)
                     else:
-                        beam_repeated = tf.repeat(tf.expand_dims(beams[i], axis=0), repeats=beam_search_size, axis=0)
-                        new_beam = tf.concat((beam_repeated, tf.expand_dims(top_words, axis=1)), axis=1)
+                        new_beam = tf.concat((
+                            tf.repeat(tf.expand_dims(beams[i], axis=0), repeats=beam_search_size, axis=0),
+                            tf.expand_dims(top_words, axis=1)
+                        ), axis=1)
 
-                    if tf.size(new_beams) == 0:
-                        dec_states = tf.repeat(tf.expand_dims(decoder_state, axis=0), repeats=beam_search_size, axis=0)
-                        new_observations = tf.expand_dims(top_words, axis=1)
-                        new_beams = new_beam
-                    else:
-                        decoder_state = tf.repeat(tf.expand_dims(tf.stack(decoder_state), axis=0),
-                                                  repeats=beam_search_size, axis=0)
-                        dec_states = tf.concat((dec_states, decoder_state), axis=0)
-                        new_observations = tf.concat((new_observations, tf.expand_dims(top_words, axis=1)), axis=0)
-                        new_beams = tf.concat((new_beams, new_beam), axis=0)
+                    k = i * beam_search_size
+                    for beam_ind in tf.range(beam_search_size):
+                        new_probs = new_probs.write(k+beam_ind, top_probs[beam_ind])
+                        dec_states = dec_states.write(k+beam_ind, decoder_state)
+                        new_observations = new_observations.write(k+beam_ind, [top_words[beam_ind]])
                 else:
                     # For finished beams, save the most promising one if it's better than the current best
                     if beam_probs[i] > best_beam_prob:
                         best_beam_prob = beam_probs[i]
                         best_beam = beams[i]
+                    # Sets probability to 0 to avoid further exploring these paths
+                    for k in range(i*beam_search_size, (i+1)*beam_search_size):
+                        new_probs = new_probs.write(k, 0.0)
+                    new_beam = tf.zeros(shape=(beam_search_size, tf.shape(beams[0])[0] + 1), dtype=tf.int32)
 
-            probs = probs.stack()
+                if tf.equal(tf.size(new_beams), 0):
+                    new_beams = new_beam
+                else:
+                    new_beams = tf.concat((new_beams, new_beam), axis=0)
+
+            probs, decoder_states, observations = new_probs.stack(), dec_states.stack(), new_observations.stack()
             probs = tf.reshape(probs, shape=(-1,))
-            beams = new_beams
             beam_probs, idx = tf.math.top_k(probs, k=beam_search_size)
-            beams = tf.gather(beams, idx)
-            decoder_states = tf.gather(dec_states, idx)
-            observations = tf.gather(new_observations, idx)
+            beams = tf.gather(new_beams, idx)
+            decoder_states = tf.gather(decoder_states, idx)
+            observations = tf.gather(observations, idx)
             first_step = tf.constant(False)
             it += 1
         if best_beam_prob > tf.reduce_max(beam_probs):
             return best_beam
         return beams[tf.argmax(beam_probs, axis=0)]
 
-    def get_initial_state(self, base_question, facts, training=True):
+    def get_initial_state(self, base_question, facts, batch_size, training=True):
         base_question_embeddings = self.embedding_layer(base_question)
         facts_embeddings = self.embedding_layer(facts)
         facts_encodings = self.fact_encoder(facts_embeddings, training=training)
@@ -250,10 +254,10 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             base_question_embeddings=base_question_embeddings,
             facts_encodings=facts_encodings,
             decoder_states=(
-                tf.zeros(shape=(self.config.batch_size, self.config.decoder_hidden_size)),
-                tf.zeros(shape=(self.config.batch_size, self.config.decoder_hidden_size))
+                tf.zeros(shape=(batch_size, self.config.decoder_hidden_size)),
+                tf.zeros(shape=(batch_size, self.config.decoder_hidden_size))
             ),
-            observation=tf.zeros(shape=(self.config.batch_size,), dtype=tf.int32),
+            observation=tf.zeros(shape=(batch_size,), dtype=tf.int32),
             is_first_step=True
         )
         return network_state

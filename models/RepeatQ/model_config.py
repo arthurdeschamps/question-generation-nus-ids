@@ -23,7 +23,9 @@ class ModelConfiguration:
                  supervised_epochs=6,
                  dev_step_size=100,
                  learning_rate=None,
-                 saving_model=False):
+                 saving_model=False,
+                 training_beam_search_size=3,
+                 nb_episodes=32):
         super(ModelConfiguration, self).__init__()
         self.recurrent_dropout = recurrent_dropout
         self.fact_encoder_hidden_size = fact_encoder_hidden_size
@@ -46,11 +48,17 @@ class ModelConfiguration:
         self.dev_step_size = dev_step_size
         self.learning_rate = learning_rate
         self.saving_model = saving_model
+        self.training_beam_search_size = training_beam_search_size
+        self.nb_episodes = nb_episodes
 
     @staticmethod
     def new() -> 'ModelConfiguration':
         config = ModelConfiguration()
         return config
+
+    def with_episodes(self, nb_episodes):
+        self.nb_episodes = nb_episodes
+        return self
 
     def with_batch_size(self, batch_size):
         self.batch_size = batch_size

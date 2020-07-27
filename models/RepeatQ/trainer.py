@@ -42,16 +42,17 @@ class RepeatQTrainer:
 
     def train(self):
         env = self._build_environment()
-
         model_save_dir = RepeatQTrainer.prepare_model_save_dir()
 
         for epoch in range(self.config.epochs):
             phase = self.phase(epoch)
 
             tf.print(f"Starting Epoch {epoch + 1}.")
-            for features, label in tqdm(self.training_data):
-                features["target"] = features["base_question"]
-                features["facts"] = features["facts"][:, :3]
+            if phase == self.reinforce_phase:
+                ds = self.training_data.batch(self.config.nb_episodes, drop_remainder=True)
+            else:
+                ds = self.training_data
+            for features, label in tqdm(ds):
                 self.train_step(features, label, env, phase=phase)
 
             dev_score = self.dev_step(phase, env)
@@ -62,29 +63,10 @@ class RepeatQTrainer:
 
     @tf.function
     def train_step(self, features, labels, environment, phase):
-        batch_size = features["facts"].shape[0]
-
-        def debug_output(predictions, base_question, target):
-            tf.print("Predicted: ", " ".join([self.reverse_voc[int(t)] for t in predictions if int(t) != 0]))
-            tf.print("Rewritten : ", " ".join([self.reverse_voc[int(t)] for t in target if int(t) != 0]))
-            tf.print("Base question: ", " ".join([self.reverse_voc[int(t)] for t in base_question if int(t) != 0]))
-            return 0
-
-        with tf.GradientTape() as tape:
-            target = labels
-            actions, logits = self.model.get_actions([
-                features["base_question"], features["facts"]
-            ], target=target, training=True, phase=phase)
-            tf.py_function(debug_output, inp=(actions[0], features["base_question"][0], target[0]), Tout=tf.int32)
-
-            if phase == RepeatQTrainer.reinforce_phase:
-                loss = self._policy_gradient(actions, target, logits, features, environment, batch_size)
-            elif phase == RepeatQTrainer.supervised_phase:
-                mask = tf.cast(tf.not_equal(target, 0), dtype=tf.float32, name="seq_loss_mask")
-                loss = tfa.seq2seq.sequence_loss(
-                    logits=logits, targets=target, weights=mask, sum_over_batch=True, sum_over_timesteps=True,
-                    average_across_timesteps=False, average_across_batch=False
-                )
+        if phase == RepeatQTrainer.reinforce_phase:
+            loss, tape = self._reinforce_step(features, labels, environment)
+        else:
+            loss, tape = self._supervised_step(features, labels)
         tf.print("Loss: ", loss)
         gradients = tape.gradient(loss, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
@@ -95,9 +77,7 @@ class RepeatQTrainer:
         predicted_questions = tf.TensorArray(size=self.config.dev_step_size, dtype=tf.int32, name="dev_predictions")
         labels = tf.TensorArray(size=self.config.dev_step_size, dtype=tf.int32, name="dev_labels")
         for i, (features, label) in tqdm(enumerate(self.dev_data.take(self.config.dev_step_size))):
-            actions, _ = self.model.get_actions(
-                [features["base_question"], features["facts"]], target=label, training=False, phase=phase
-            )
+            actions, _ = self.model.get_actions(features, target=label, training=False, phase=phase)
             paddings = (
                 (0, 0), (0, tf.math.maximum(0, self.config.max_generated_question_length - tf.shape(actions)[1]))
             )
@@ -132,28 +112,73 @@ class RepeatQTrainer:
             return self.supervised_phase
         return self.reinforce_phase
 
-    def _policy_gradient(self, actions, target, logits, features, environment, batch_size):
+    def _supervised_step(self, features, target):
+        with tf.GradientTape() as tape:
+            actions, logits = self.model.get_actions(
+                features, target=target, training=True, phase=self.supervised_phase
+            )
+            tf.py_function(self._debug_output, inp=(actions[0], features["base_question"][0], target[0]), Tout=tf.int32)
+            mask = tf.cast(tf.not_equal(target, 0), dtype=tf.float32, name="seq_loss_mask")
+            loss = tfa.seq2seq.sequence_loss(
+                logits=logits, targets=target, weights=mask, sum_over_batch=True, sum_over_timesteps=True,
+                average_across_timesteps=False, average_across_batch=False
+            )
+        return loss, tape
+
+    def _reinforce_step(self, features, targets, environment):
+        nb_episodes = targets.get_shape()[0]
+        beams = tf.TensorArray(size=nb_episodes, dtype=tf.int32)
+        # First collects episodes using non-differentiable beam search
+        tf.print("Collecting ", nb_episodes, " episodes...")
+        for episode in tf.range(nb_episodes):
+            inputs = {k: v[episode] for k, v in features.items()}
+            beam = self.model.beam_search(
+                inputs=inputs, beam_search_size=self.config.training_beam_search_size
+            )
+            if tf.size(beam) < self.config.max_generated_question_length:
+                beam = tf.pad(beam, paddings=[[0, self.config.max_generated_question_length - tf.size(beam)]])
+            beams = beams.write(episode, beam)
+        tf.print("Episodes collected.")
+
+        # Prepare data for batched run
+        beams = beams.stack()
+        features = {k: tf.squeeze(v, axis=1) for k, v in features.items()}
+        targets = tf.squeeze(targets, axis=1)
+
+        # Uses predicted sequence as ground truth in "teacher forcing" phase
+        with tf.GradientTape() as tape:
+            actions, logits = self.model.get_actions(features, beams, training=True, phase=self.reinforce_phase)
+            tf.py_function(self._debug_output, inp=(actions[0], features["base_question"][0], targets[0]), Tout=tf.int32)
+            loss = self._policy_gradient_loss(
+                actions=actions, targets=targets, features=features, environment=environment, logits=logits
+            )
+        return loss, tape
+
+    def _policy_gradient_loss(self, actions, targets, features, environment, logits=None, action_probs=None):
+        if logits is None and action_probs is None:
+            ValueError("Both logits and action_probs are None. Please provide either.")
 
         def compute_reward(predictions, base_question, target_question):
             return environment.compute_reward(predictions, base_question, target_question)
 
         gradients = tf.TensorArray(dtype=tf.float32, size=self.config.batch_size, name="grads")
-        probs = tf.math.softmax(logits, axis=-1)
-        action_probs = tf.gather(probs, actions, batch_dims=2, axis=2)
+        if action_probs is None:
+            probs = tf.math.softmax(logits, axis=-1)
+            action_probs = tf.gather(probs, actions, batch_dims=2, axis=2)
         log_probs = tf.math.log(action_probs, name="log_probs")
         mask = tf.cast(tf.not_equal(actions, 0), dtype=tf.float32, name="reinforce_mask")
         average_reward = 0.0
-        for i in tf.range(batch_size):
+        for i in tf.range(self.config.batch_size):
             episode_actions = actions[i]
             episode_reward = tf.py_function(
                 compute_reward,
-                inp=(episode_actions, features["base_question"][i], target[i]),
+                inp=(episode_actions, features["base_question"][i], targets[i]),
                 Tout=tf.float32
             )
             # episode_rewards = tf.concat(
             #     (tf.zeros(shape=(tf.size(episode_actions) - 1,)), [episode_reward]), axis=0
             # )
-            average_reward += episode_reward / batch_size
+            average_reward += episode_reward / self.config.batch_size
             average_reward.set_shape(())
             # policy_gradient = RepeatQTrainer._get_policy_gradient(episode_rewards, log_probs[i], action_probs[i], mask[i])
             policy_gradient = - episode_reward * tf.reduce_sum(mask[i] * log_probs[i])
@@ -175,9 +200,14 @@ class RepeatQTrainer:
         )
         return environment
 
+    def _debug_output(self, predictions, base_question, target):
+        tf.print("Predicted: ", " ".join([self.reverse_voc[int(t)] for t in predictions if int(t) != 0]))
+        tf.print("Rewritten : ", " ".join([self.reverse_voc[int(t)] for t in target if int(t) != 0]))
+        tf.print("Base question: ", " ".join([self.reverse_voc[int(t)] for t in base_question if int(t) != 0]))
+        return 0
+
     @staticmethod
     def _get_policy_gradient(rewards, log_probs, episode_probs, mask):
-        #return - rewards * tf.reduce_sum(log_probs, axis=0)
         discount_factor = 0.9
         discounted_rewards = tf.TensorArray(size=len(rewards), dtype=tf.float32)
         for t in range(len(rewards)):
