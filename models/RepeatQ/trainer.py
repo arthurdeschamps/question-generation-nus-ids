@@ -48,11 +48,7 @@ class RepeatQTrainer:
             phase = self.phase(epoch)
 
             tf.print(f"Starting Epoch {epoch + 1}.")
-            if phase == self.reinforce_phase:
-                ds = self.training_data.batch(self.config.nb_episodes, drop_remainder=True)
-            else:
-                ds = self.training_data
-            for features, label in tqdm(ds):
+            for features, label in tqdm(self.training_data):
                 self.train_step(features, label, env, phase=phase)
 
             dev_score = self.dev_step(phase, env)
@@ -127,23 +123,12 @@ class RepeatQTrainer:
 
     def _reinforce_step(self, features, targets, environment):
         nb_episodes = targets.get_shape()[0]
-        beams = tf.TensorArray(size=nb_episodes, dtype=tf.int32)
         # First collects episodes using non-differentiable beam search
         tf.print("Collecting ", nb_episodes, " episodes...")
-        for episode in tf.range(nb_episodes):
-            inputs = {k: v[episode] for k, v in features.items()}
-            beam = self.model.beam_search(
-                inputs=inputs, beam_search_size=self.config.training_beam_search_size
-            )
-            if tf.size(beam) < self.config.max_generated_question_length:
-                beam = tf.pad(beam, paddings=[[0, self.config.max_generated_question_length - tf.size(beam)]])
-            beams = beams.write(episode, beam)
+        beams = self.model.beam_search(
+            inputs=features, beam_search_size=self.config.training_beam_search_size
+        )
         tf.print("Episodes collected.")
-
-        # Prepare data for batched run
-        beams = beams.stack()
-        features = {k: tf.squeeze(v, axis=1) for k, v in features.items()}
-        targets = tf.squeeze(targets, axis=1)
 
         # Uses predicted sequence as ground truth in "teacher forcing" phase
         with tf.GradientTape() as tape:
