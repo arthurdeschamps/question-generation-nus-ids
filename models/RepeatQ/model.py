@@ -105,7 +105,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             logits, decoder_states = self(network_state, training=training)
             probs = tf.math.softmax(logits, axis=-1, name="probs")
             predicted_tokens = tf.argmax(probs, axis=-1, output_type=tf.int32, name="pred_tokens")
-            if phase == RepeatQTrainer.reinforce_phase and training:
+            if training:
                 predicted_tokens = \
                     tf.where(
                         finished,
@@ -133,7 +133,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             )
             ite = tf.add(ite, 1)
             finished = tf.logical_or(finished, tf.repeat(tf.equal(size, ite), repeats=(tf.shape(target)[0],)))
-            if phase == RepeatQTrainer.supervised_phase:
+            if phase == RepeatQTrainer.supervised_phase and training:
                 # Goes all the way to the target length
                 finished = tf.logical_or(finished, tf.equal(target[:, tf.minimum(size-1, ite)], 0))
             elif phase == RepeatQTrainer.reinforce_phase:
@@ -180,15 +180,15 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         )
         observations = batchify(initial_network_state.observation, name="observations")
         beams = tf.zeros(shape=(batch_size, beam_search_size, beam_length), dtype=tf.int32, name="beams")
-        beam_probs = tf.expand_dims(tf.repeat(
-            tf.expand_dims(tf.concat((tf.zeros(shape=(beam_search_size-1,)), [1.0]), axis=0), axis=0),
+        beam_log_probs = tf.expand_dims(tf.repeat(
+            tf.expand_dims(tf.concat((tf.zeros(shape=(beam_search_size-1,)), [-1.0]), axis=0), axis=0),
             repeats=batch_size,
             axis=0,
             name="beam_probs"
         ), axis=-1)
         first_step = tf.constant(True)
         best_beam = tf.zeros(shape=(batch_size, beam_length), dtype=tf.int32, name="best_beam")
-        best_beam_prob = tf.zeros(shape=(batch_size,), dtype=tf.float32, name="best_beam_prob")
+        best_beam_prob = tf.fill((batch_size,), value=tf.float32.min, name="best_beam_prob")
 
         def beam_not_finished(_beam, _last_ind):
             return tf.logical_or(
@@ -221,16 +221,17 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             # top_probs: [batch size, beam size, beam size]
             top_probs, top_words = tf.math.top_k(distributions, k=beam_search_size)
             # [batch size, beam size, 1] -> [batch size, beam size, beam_size]
-            beam_probs = tf.repeat(beam_probs, repeats=beam_search_size, axis=-1)
-            top_probs = tf.math.multiply(top_probs, beam_probs)
+            beam_log_probs = tf.repeat(beam_log_probs, repeats=beam_search_size, axis=-1)
+            top_probs = tf.math.add(tf.math.log(top_probs), beam_log_probs)
             # Masks finished beams probs
             beam_mask = beams_not_finished(beams, it-1)
             top_probs = tf.where(beam_mask, top_probs, tf.zeros_like(top_probs, dtype=tf.float32))
+            top_words = tf.where(beam_mask, top_words, tf.zeros_like(top_words, dtype=tf.int32))
             # [batch size, beam size * beam size]
             top_probs = tf.reshape(top_probs, shape=(batch_size, beam_search_size ** 2))
             top_words = tf.reshape(top_words, shape=(batch_size, beam_search_size ** 2))
             # beam_probs: [batch size, beam size]
-            beam_probs, top_beam_indices = tf.math.top_k(top_probs, k=beam_search_size)
+            beam_log_probs, top_beam_indices = tf.math.top_k(top_probs, k=beam_search_size)
             # [batch size, beam size, seq length] -> [batch size, beam size * beam size, seq length]
             beams = tf.repeat(beams, repeats=beam_search_size, axis=1)
             decoder_states = tuple(tf.repeat(s, beam_search_size, axis=1) for s in decoder_states)
@@ -243,34 +244,37 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             beams.set_shape((batch_size, beam_search_size, beam_length))
 
             # Memorize best beam per batch so far
-            beam_idx = tf.argmax(beam_probs, axis=-1)
+            beam_idx = tf.argmax(beam_log_probs, axis=-1)
             best_beam_per_batch = tf.gather(beams, tf.expand_dims(beam_idx, axis=-1), axis=1, batch_dims=1)
             beam_finished = tf.reshape(tf.logical_not(beams_not_finished(best_beam_per_batch, it)), shape=(batch_size,))
-            best_beam_prob_per_batch = tf.reduce_max(beam_probs, axis=-1)
+            best_beam_prob_per_batch = tf.reduce_max(beam_log_probs, axis=-1)
             # Needs to both have a higher likelihood and be a finished beam
-            better_beam = tf.logical_and(tf.greater_equal(best_beam_prob_per_batch, best_beam_prob), beam_finished)
+            # We also divide by the beam length for normalization sake
+            better_beam = tf.logical_and(
+                tf.greater_equal(best_beam_prob_per_batch/tf.cast(it, tf.float32), best_beam_prob),
+                beam_finished
+            )
             best_beam = tf.where(
                 tf.expand_dims(better_beam, axis=1),
                 tf.squeeze(best_beam_per_batch, axis=1),
                 best_beam
             )
-            best_beam_prob = tf.where(better_beam, best_beam_prob_per_batch, best_beam_prob)
+            best_beam_prob = tf.where(better_beam, best_beam_prob_per_batch/tf.cast(it, tf.float32), best_beam_prob)
 
             decoder_states = tuple(tf.gather(s, top_beam_indices, axis=1, batch_dims=1) for s in decoder_states)
             decoder_states = tuple(collapse_dims(s) for s in decoder_states)
             observations = collapse_dims(top_words)
-            beam_probs = tf.expand_dims(beam_probs, axis=-1)
+            beam_log_probs = tf.expand_dims(beam_log_probs, axis=-1)
             first_step = tf.constant(False)
 
             it += 1
-        beam_probs = tf.squeeze(beam_probs, axis=-1)
-        beam_indices = tf.argmax(beam_probs, axis=1)
-        beam_probs = tf.reduce_max(beam_probs, axis=1)
+        beam_log_probs = tf.squeeze(beam_log_probs, axis=-1)
+        beam_indices = tf.argmax(beam_log_probs, axis=1)
+        beam_log_probs = tf.reduce_max(beam_log_probs, axis=1)
         beams = tf.gather(beams, beam_indices, axis=1, batch_dims=1)
-        cond = tf.expand_dims(tf.greater(best_beam_prob, beam_probs), axis=-1)
+        cond = tf.expand_dims(tf.greater(best_beam_prob, beam_log_probs/tf.cast(beam_length, tf.float32)), axis=-1)
         best_beams = tf.where(cond, best_beam, beams)
-        best_beam_probs = tf.where(tf.squeeze(cond, axis=1), best_beam_prob, beam_probs)
-        tf.print(best_beam_probs)
+        best_beam_probs = tf.where(tf.squeeze(cond, axis=1), best_beam_prob, beam_log_probs)
         if return_probs:
             return best_beams, best_beam_probs
         return best_beams

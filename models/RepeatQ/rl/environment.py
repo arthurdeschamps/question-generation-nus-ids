@@ -66,20 +66,19 @@ class RepeatQEnvironment(PyEnvironment):
         self._state = state
 
     def compute_reward(self, predicted_tokens, base_question, target_question):
+
         predicted_tokens = self.make_sequence(predicted_tokens.numpy())
         base_question = self.make_sequence(base_question.numpy())
         target_question = self.make_sequence(target_question.numpy())
 
-        if len(predicted_tokens) == 0:
-            return 1e-9
-
         def compute_reward(candidate):
+            if len(candidate) == 0 or len([t for t in candidate if t != 0]) == 0:
+                return 0.0
             return sum(weight * reward_fn(candidate, target_question) for weight, reward_fn in
                        self.weighted_reward_functions)
 
         baseline_reward = compute_reward(base_question)
         reward = compute_reward(predicted_tokens)
-        return reward
         return reward - baseline_reward
 
     def observation_spec(self):
@@ -129,8 +128,8 @@ class RepeatQEnvironment(PyEnvironment):
             return _bleu_n
 
         def _meteor(candidate, target_question):
-            predicted_sentence = " ".join(self.token_to_word_voc[int(t)] for t in candidate)
-            target = " ".join(self.token_to_word_voc[int(t)] for t in target_question)
+            predicted_sentence = self._tokens_to_sentence(candidate)
+            target = self._tokens_to_sentence(target_question)
             score = meteor_score([target], predicted_sentence)
             return score
 
@@ -140,16 +139,13 @@ class RepeatQEnvironment(PyEnvironment):
             return penalty
 
         def _contains_question_mark(candidate, _):
+            return str(self.word_to_token_voc["?"]) in candidate
             return 1.0 if candidate[-1] == str(self.word_to_token_voc["?"]) else 0.0
 
         return {
-            # (5.0, _bleu(1)),
-            # (10.0, _bleu(2)),
-            # (50.0, _bleu(3)),
-            # (100.0, _bleu(4)),
             (1.0, _contains_question_mark),
-            #(0.5, _repetitiveness_penalty),
-            (10.0, _meteor)
+            #(1.0, _repetitiveness_penalty),
+            #(100.0, _meteor)
         }
 
     def make_sequence(self, tokens: Tensor):
@@ -165,3 +161,6 @@ class RepeatQEnvironment(PyEnvironment):
             base_question=None, predicted_tokens=[self.pad_token for _ in range(self.max_sequence_length)],
             sequence_index=0
         )
+
+    def _tokens_to_sentence(self, tokens):
+        return " ".join(self.token_to_word_voc[int(t)] for t in tokens)

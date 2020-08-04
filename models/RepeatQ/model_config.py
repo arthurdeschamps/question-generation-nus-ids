@@ -24,7 +24,7 @@ class ModelConfiguration:
                  dev_step_size=100,
                  learning_rate=None,
                  saving_model=False,
-                 training_beam_search_size=3,
+                 training_beam_search_size=5,
                  nb_episodes=32):
         super(ModelConfiguration, self).__init__()
         self.recurrent_dropout = recurrent_dropout

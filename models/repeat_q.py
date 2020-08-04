@@ -78,7 +78,7 @@ def train(data_dir, data_limit, batch_size, learning_rate, epochs, supervised_ep
 
 
 def translate(model_dir, data_dir):
-    config = ModelConfiguration.new().with_batch_size(1)
+    config = ModelConfiguration.new().with_batch_size(5)
     
     save_path = REPEAT_Q_SQUAD_OUTPUT_FILEPATH
     if not os.path.exists(os.path.dirname(save_path)):
@@ -94,9 +94,11 @@ def translate(model_dir, data_dir):
     
     with open(save_path, mode='w') as pred_file:
         for feature, label in tqdm(data):
-            translated = to_string(model.beam_search(feature, beam_search_size=5).numpy())
-            tf.print(translated)
-            pred_file.write(translated + "\n")
+            preds = model.beam_search(feature, beam_search_size=3)
+            for pred in preds:
+                translated = to_string(pred.numpy())
+                tf.print(translated)
+                pred_file.write(translated + "\n")
 
 
 def create_embedding_matrix(pretrained_path, vocab, pad_token, unk_token):
@@ -202,7 +204,7 @@ def preprocess(data_dirpath, save_dir, ds_name, voc_size, pretrained_embeddings_
 
 if __name__ == '__main__':
     logging.getLogger(__name__).setLevel(logging.NOTSET)
-    os.environ["CUDA_VISIBLE_DEVICES"] = "9"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "11"
     parser = argparse.ArgumentParser()
     parser.add_argument("action", default="train", type=str, choices=("translate", "preprocess", "train"))
     parser.add_argument("-data_dir", help="Used if action is train or translate. Directory path where all the data "
