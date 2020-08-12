@@ -8,19 +8,20 @@ from logging import info, warning, debug
 import pandas as pd
 import nltk
 import stanza
+from stanza import Document
 from tqdm import tqdm
 
 from data_processing.mpqg_dataset import MPQGDataset
 from data_processing.parse import read_medquad_raw_dataset, read_squad_dataset, read_squad_facts_files, \
-    read_squad_rewrites_files, read_squad_qmap_files
+    read_squad_rewrites_files, read_squad_qmap_files, read_squad_rewrites_human_made, get_squad_question_to_answers_map
 from data_processing.utils import array_to_string
 from defs import NQG_MODEL_DIR, NQG_DATA_HOME, MEDQUAD_DIR, MEDQUAD_DEV, MEDQUAD_TRAIN, \
     MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_RAW_DATASET_FILEPATH, HOTPOT_QA_DEV_JSON, \
     HOTPOT_QA_DEV_TARGETS_PATH, \
     REPEAT_Q_RAW_DATASETS, SQUAD_FACTS_TRAIN, SQUAD_FACTS_DEV, SQUAD_REWRITES_DEV, SQUAD_REWRITES_TRAIN, \
-    ASS2S_PROCESSED_SQUAD_MPQG_DATA
+    ASS2S_PROCESSED_SQUAD_MPQG_DATA, SQUAD_REWRITES_AMAZON_TURK_1_JSON
 from data_processing.nqg_dataset import NQGDataset
-from data_processing.pre_processing import NQGDataPreprocessor
+from data_processing.nqg_pre_processing import NQGDataPreprocessor
 import numpy as np
 
 
@@ -265,9 +266,9 @@ def generate_hotpot_targets(json_data_path, savepath):
 
 def generate_repeat_q_squad_raw():
     os.environ["CUDA_VISIBLE_DEVICES"] = "8"
-    #tokenize = stanza.Pipeline(lang='en', processors='tokenize')
-    tokenize = nltk.word_tokenize
+    nlp = stanza.Pipeline(lang='en', processors='tokenize,pos,ner')
 
+    # Synthetic data (created through hard-coded rules)
     facts_train = read_squad_facts_files(facts_dirpath=SQUAD_FACTS_TRAIN)
     rewrites_train = read_squad_rewrites_files(rewrites_dirpath=SQUAD_REWRITES_TRAIN)
     question_to_facts_map_train = read_squad_qmap_files(qmap_dirpath=SQUAD_FACTS_TRAIN)
@@ -275,39 +276,112 @@ def generate_repeat_q_squad_raw():
     rewrites_dev = read_squad_rewrites_files(rewrites_dirpath=SQUAD_REWRITES_DEV)
     question_to_facts_map_dev = read_squad_qmap_files(qmap_dirpath=SQUAD_FACTS_DEV)
 
-    ds = []
+    # Organic data (amazon turk)
+    org_examples = read_squad_rewrites_human_made(dirpath=SQUAD_REWRITES_AMAZON_TURK_1_JSON)
+    org_examples_train = org_examples[:int(len(org_examples)*0.8)]
+    org_examples_test = org_examples[int(len(org_examples)*0.8):]
 
-    def _make_example(_base_question, _rewritten_question, _facts, _passage_id):
-        # Create example placeholders and filter out irrelevant question words for future word matching
-        def _tokenize(sentence):
-            return " ".join(tokenize(sentence)).lower()
-        tokenized_question = _tokenize(base_question)
-        target = _tokenize(_rewritten_question)
-        tokenized_facts = [_tokenize(fact["text"]) for fact in _facts]
-        example = {
-            "base_question": tokenized_question,
-            "facts": tokenized_facts,
-            "target": target,
-            "passage_id": _passage_id
-        }
-        return example
+    question_to_answers_map = get_squad_question_to_answers_map()
 
-    for question_to_facts_map, rewrites, facts, ds_type in [
-        (question_to_facts_map_dev, rewrites_dev, facts_dev, "test"),
-        (question_to_facts_map_train, rewrites_train, facts_train, "train")
+    def _get_tokens(doc: Document):
+        return " ".join([w.text.lower() for w in doc.iter_words()])
+
+    def _get_pos_sequence(doc: Document):
+        return " ".join([w.xpos for w in doc.iter_words()])
+
+    def _get_tags(doc, sought_after_tokens, beg_tag, inside_tag, tag_list=None):
+        words = list(doc.iter_words())
+        if tag_list is None:
+            tags = ["O" for _ in range(len(words))]
+        else:
+            tags = tag_list
+        for i in range(len(words)):
+            if words[i].text == sought_after_tokens[0]:
+                complete_match = True
+                for j in range(len(sought_after_tokens)):
+                    if i+j >= len(words) or sought_after_tokens[j] != words[i+j].text:
+                        complete_match = False
+                        break
+                if complete_match:
+                    tags[i] = beg_tag
+                    for j in range(i+1, i+len(sought_after_tokens)):
+                        tags[j] = inside_tag
+        return tags
+
+    def _get_entity_tags(question_doc, answers, facts_docs):
+        q_entities = [ent.text for ent in question_doc.entities]
+        q_ent_tags = ["O" for _ in range(question_doc.num_words)]
+        facts_ent_tags = [["O" for _ in range(facts_docs[i].num_words)] for i in range(len(facts_docs))]
+        for q_entity in q_entities:
+            q_entity_toks = q_entity.split()
+            # Marks named entities in question
+            q_ent_tags = _get_tags(question_doc, q_entity_toks, beg_tag="BN", inside_tag="IN", tag_list=q_ent_tags)
+            # Marks NEs from the question in facts
+            facts_ent_tags = [_get_tags(facts_docs[i], q_entity_toks, "BN", "IN", facts_ent_tags[i])
+                              for i in range(len(facts_docs))]
+        # Overwrites tags with answer tags if any in facts
+        for answer in answers:
+            answer_tokens = answer.lower().split()
+            facts_ent_tags = [_get_tags(facts_docs[i], answer_tokens, "BA", "IA", facts_ent_tags[i])
+                              for i in range(len(facts_docs))]
+        return " ".join(q_ent_tags), [" ".join(f) for f in facts_ent_tags]
+
+    def _make_example(_base_question, _rewritten_question, _facts, _answers, _passage_id):
+        try:
+            # Create example placeholders and filter out irrelevant question words for future word matching
+            analyzed_question = nlp(_base_question)
+            analyzed_target = nlp(_rewritten_question)
+            analyzed_facts = [nlp(fact) for fact in _facts]
+            base_question_entity_tags, facts_entity_tags = _get_entity_tags(analyzed_question, _answers, analyzed_facts)
+            example = {
+                "base_question": _get_tokens(analyzed_question),
+                "base_question_pos_tags": _get_pos_sequence(analyzed_question),
+                "base_question_entity_tags": base_question_entity_tags,
+                "facts": [_get_tokens(fact) for fact in analyzed_facts],
+                "facts_entity_tags": facts_entity_tags,
+                "facts_pos_tags": [_get_pos_sequence(fact) for fact in analyzed_facts],
+                "target": _get_tokens(analyzed_target),
+                "passage_id": _passage_id,
+            }
+            return example
+        except Exception as e:
+            print(e)
+            print("Question:")
+            print(_base_question)
+            print("Target:")
+            print(_rewritten_question)
+            print("Facts:")
+            [print(f) for f in _facts]
+        return None
+
+    for question_to_facts_map, rewrites, facts, organic_examples, ds_type in [
+        (question_to_facts_map_dev, rewrites_dev, facts_dev, org_examples_test, "test"),
+        (question_to_facts_map_train, rewrites_train, facts_train, org_examples_train, "train")
     ]:
+        ds = []
+
         for passage_id in tqdm(list(question_to_facts_map.keys())):
             questions = rewrites[passage_id]
             question_to_facts = question_to_facts_map[passage_id]
             for question in questions:
                 base_question = question["base_question"]
                 rephrased = question["rephrased"]
+                answers = question_to_answers_map[base_question.strip()]
                 if base_question in question_to_facts:
                     fact_ids = question_to_facts[base_question]
-                    passage_facts = [facts[passage_id][fact_id] for fact_id in fact_ids]
-                    ds.append(_make_example(base_question, rephrased, passage_facts, passage_id))
+                    passage_facts = [facts[passage_id][fact_id]["text"] for fact_id in fact_ids]
+                    ex = _make_example(base_question, rephrased, passage_facts, answers, passage_id)
+                    if ex is not None:
+                        ds.append(ex)
+
+        for example in tqdm(organic_examples):
+            answers = question_to_answers_map[example["base_question"].strip()]
+            ex = _make_example(example["base_question"], example["target"], example["facts"], answers, -1)
+            if ex is not None:
+                ds.append(ex)
+
         with open(f"{REPEAT_Q_RAW_DATASETS}/squad_{ds_type}.json", mode='w') as f:
-            json.dump(ds, f)
+            json.dump(ds, f, indent=4)
 
 
 if __name__ == '__main__':

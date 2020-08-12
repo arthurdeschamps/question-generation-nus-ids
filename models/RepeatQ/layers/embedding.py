@@ -16,12 +16,18 @@ class Embedding(tf.keras.layers.Layer):
         self.supports_masking = True
 
     def call(self, inputs, mask=None):
+        sentence = inputs["sentence"]
+        features = inputs["features"]
+        word_embeddings = self.embed_words(sentence)
+        return tf.concat((word_embeddings, features), axis=-1)
+
+    def embed_words(self, words):
         return tf.nn.embedding_lookup(
-            self.embedding_matrix, inputs, name="embedding_lookup"
+            self.embedding_matrix, words, name="embedding_lookup"
         )
 
     def compute_mask(self, inputs, previous_mask=None):
-        return tf.not_equal(inputs, 0)
+        return tf.not_equal(inputs["sentence"], 0)
 
     @property
     def size(self):

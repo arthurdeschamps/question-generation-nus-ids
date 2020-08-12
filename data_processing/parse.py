@@ -11,7 +11,7 @@ from tqdm import tqdm
 from transformers import BertConfig
 
 from data_processing.utils import array_to_string
-from defs import PRETRAINED_MODELS_DIR, MEDQUAD_RAW_DIR
+from defs import PRETRAINED_MODELS_DIR, MEDQUAD_RAW_DIR, SQUAD_TRAIN, SQUAD_DEV
 from data_processing.class_defs import SquadExample, Question, Answer, SquadMultiQAExample
 import os
 from data_processing.class_defs import QAExample
@@ -213,3 +213,43 @@ def read_squad_qmap_files(qmap_dirpath):
                     q_maps[question] = fact_ids
             question_to_facts[passage_id] = q_maps
     return question_to_facts
+
+
+def read_squad_rewrites_human_made(dirpath):
+    with open(dirpath, mode="r") as f:
+        data = json.load(f)
+        questions_to_facts = {}
+        questions_to_rewrites = {}
+        for datapoint in data:
+            q = datapoint["question"]
+            fact = datapoint["fact"]
+            rewrites = datapoint["rewrites"]
+            if q in questions_to_facts:
+                questions_to_facts[q].append(fact)
+                questions_to_rewrites[q].extend(rewrites)
+            else:
+                questions_to_facts[q] = [fact]
+                questions_to_rewrites[q] = rewrites
+    ds = []
+    for q in questions_to_facts.keys():
+        for target in questions_to_rewrites[q]:
+            ds.append({
+                "base_question": q,
+                "facts": questions_to_facts[q],
+                "target": target
+            })
+    return ds
+
+
+def get_squad_question_to_answers_map():
+    qa_map = {}
+
+    def _read_qas(path):
+        ds = pd.read_json(path)["data"]
+        for article in ds:
+            for paragraph in article["paragraphs"]:
+                for qa in paragraph["qas"]:
+                    qa_map[qa["question"].strip()] = [answer["text"] for answer in qa["answers"]]
+    _read_qas(SQUAD_DEV)
+    _read_qas(SQUAD_TRAIN)
+    return qa_map

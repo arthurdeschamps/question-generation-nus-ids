@@ -1,14 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="idsd-2" overwriteAll="false" createEmptyFolders="true">
+  <component name="PublishConfigData" autoUpload="Always" serverName="idsd-2" overwriteAll="false" createEmptyFolders="true" compareModeInSync="TIMESTAMP">
     <serverData>
-      <paths name="arthurdeschamp@idsd-2.d2.comp.nus.edu.sg:5018 password">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/home/arthurdeschamp/question-generation" local="$PROJECT_DIR$" />
-          </mappings>
-        </serverdata>
-      </paths>
       <paths name="idsd-2">
         <serverdata>
           <mappings>

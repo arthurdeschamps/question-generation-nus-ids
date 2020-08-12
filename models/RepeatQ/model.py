@@ -1,9 +1,6 @@
 import functools
-import logging
 from collections import namedtuple
-import os
 import tensorflow as tf
-import numpy as np
 from tensorflow import Tensor
 
 from defs import REPEAT_Q_EMBEDDINGS_FILENAME, PAD_TOKEN, REPEAT_Q_TRAIN_CHECKPOINTS_DIR
@@ -57,9 +54,9 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         logits, (hidden_state, carry_state) = self.decoder({
                 "base_question_embeddings": inputs.base_question_embeddings,
                 "facts_encodings": inputs.facts_encodings,
-                "previous_token_embedding": self.embedding_layer(inputs.observation),
+                "previous_token_embedding": self.embedding_layer.embed_words(inputs.observation),
                 "decoder_state": inputs.decoder_states
-        })
+        }, training=training)
 
         # Only decodes further for non-finished beams (last token wasn't a padding token or a question mark)
         mask = tf.expand_dims(tf.logical_or(
@@ -75,28 +72,37 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
 
         return logits, (hidden_state, carry_state)
 
-    @tf.function
+    #@tf.function
     def get_actions(self, inputs, target, training, phase):
         from models.RepeatQ.trainer import RepeatQTrainer
-        batch_size = target.get_shape()[0]
-        finished = tf.fill(dims=(tf.shape(target)[0],), value=False)
-
-        if phase == RepeatQTrainer.supervised_phase:
-            size = target.shape[1]
-        elif phase == RepeatQTrainer.reinforce_phase:
-            size = self.config.max_generated_question_length
+        if training:
+            batch_size = target.get_shape()[0]
         else:
-            raise NotImplementedError()
+            batch_size = inputs["base_question"].get_shape()[0]
+        finished = tf.fill(dims=(batch_size,), value=False)
+
+        if phase == RepeatQTrainer.supervised_phase and training:
+            size = target.shape[1]
+        else:
+            size = self.config.max_generated_question_length
 
         base_question, facts = inputs["base_question"], inputs["facts"]
-        network_state = self.get_initial_state(base_question, facts, batch_size)
+        base_question_features, facts_features = inputs["base_question_features"], inputs["facts_features"]
+        network_state = self.get_initial_state(
+            base_question=base_question,
+            base_question_features=base_question_features,
+            facts=facts,
+            facts_features=facts_features,
+            batch_size=batch_size,
+            training=training
+        )
 
         all_logits = tf.TensorArray(dtype=tf.float32, size=size, name="logits")
         actions = tf.TensorArray(dtype=tf.int32, size=size, name="agent_actions")
         ite = tf.constant(0, dtype=tf.int32)
 
         def _continue_loop(it, beams_finished):
-            if phase == RepeatQTrainer.supervised_phase:
+            if phase == RepeatQTrainer.supervised_phase and training:
                 return tf.less(it, size)
             else:
                 return tf.reduce_any(tf.logical_not(beams_finished))
@@ -136,13 +142,11 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             if phase == RepeatQTrainer.supervised_phase and training:
                 # Goes all the way to the target length
                 finished = tf.logical_or(finished, tf.equal(target[:, tf.minimum(size-1, ite)], 0))
-            elif phase == RepeatQTrainer.reinforce_phase:
+            else:
                 finished = tf.logical_or(
                     finished,
                     tf.logical_or(tf.equal(predicted_tokens, 0), tf.equal(predicted_tokens, self.question_mark_id))
                 )
-            else:
-                raise NotImplementedError()
             finished.set_shape(shape=(batch_size,))
         # Switch from time major to batch major
         actions = tf.transpose(actions.stack()[:ite])
@@ -151,8 +155,8 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
 
     @tf.function
     def beam_search(self, inputs, beam_search_size=5, training=False, return_probs=False):
-        base_question = inputs["base_question"]
-        facts = inputs["facts"]
+        base_question, facts = inputs["base_question"], inputs["facts"]
+        base_question_features, facts_features = inputs["base_question_features"], inputs["facts_features"]
 
         # Initialize variables
         batch_size = base_question.get_shape()[0]
@@ -170,7 +174,12 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             return collapse_dims(t)
 
         initial_network_state = self.get_initial_state(
-            base_question, facts, batch_size=base_question.get_shape()[0], training=training
+            base_question=base_question,
+            base_question_features=base_question_features,
+            facts=facts,
+            facts_features=facts_features,
+            batch_size=base_question.get_shape()[0],
+            training=training
         )
         base_question_embeddings = batchify(initial_network_state.base_question_embeddings, name="base_q_embds")
         facts_encodings = batchify(initial_network_state.facts_encodings, "facts_encodings")
@@ -279,9 +288,9 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             return best_beams, best_beam_probs
         return best_beams
 
-    def get_initial_state(self, base_question, facts, batch_size, training=True):
-        base_question_embeddings = self.embedding_layer(base_question)
-        facts_embeddings = self.embedding_layer(facts)
+    def get_initial_state(self, base_question, base_question_features, facts, facts_features, batch_size, training=None):
+        base_question_embeddings = self.embedding_layer({"sentence": base_question, "features": base_question_features})
+        facts_embeddings = self.embedding_layer({"sentence": facts, "features": facts_features})
         facts_encodings = self.fact_encoder(facts_embeddings, training=training)
 
         network_state = RepeatQ.NetworkState(
@@ -305,6 +314,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             facts_attention_mechanism=facts_attention,
             units=self.config.decoder_hidden_size,
             recurrent_dropout=self.config.recurrent_dropout,
+            dropout_rate=self.config.dropout_rate,
             vocab_size=len(self.vocabulary_word_to_id),
             readout_size=self.config.decoder_readout_size,
             bos_token=self.vocabulary_word_to_id[PAD_TOKEN],
@@ -315,6 +325,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         return FactEncoder(
             encoder_hidden_size=self.config.fact_encoder_hidden_size,
             recurrent_dropout=self.config.recurrent_dropout,
+            dropout_rate=self.config.dropout_rate,
             name="fact_encoder"
         )
 

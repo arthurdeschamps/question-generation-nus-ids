@@ -5,12 +5,13 @@ import tensorflow as tf
 
 class FactEncoder(tf.keras.layers.Layer):
 
-    def __init__(self, encoder_hidden_size, recurrent_dropout, *args, **kwargs):
+    def __init__(self, encoder_hidden_size, recurrent_dropout, dropout_rate, *args, **kwargs):
         super(FactEncoder, self).__init__(*args, **kwargs)
         self.supports_masking = True
         self.encoder = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
             units=encoder_hidden_size,
             recurrent_dropout=recurrent_dropout,
+            dropout=dropout_rate,
             return_sequences=True
         ), merge_mode="concat")
 

@@ -52,7 +52,6 @@ class RepeatQTrainer:
 
             tf.print(f"Starting Epoch {epoch + 1}.")
             for features, label in tqdm(self.training_data):
-                features["facts"] = features["facts"][:, :3, :80]
                 self.train_step(features, label, env, phase=phase)
 
             dev_score = self.dev_step(phase, env)
@@ -77,11 +76,7 @@ class RepeatQTrainer:
         predicted_questions = tf.TensorArray(size=self.config.dev_step_size, dtype=tf.int32, name="dev_predictions")
         labels = tf.TensorArray(size=self.config.dev_step_size, dtype=tf.int32, name="dev_labels")
         for i, (features, label) in tqdm(enumerate(self.dev_data.take(self.config.dev_step_size))):
-            tf.print("Base question: ", env._tokens_to_sentence(features["base_question"][0].numpy()), "\nFacts:")
-            for fact in features["facts"][0].numpy():
-                tf.print(env._tokens_to_sentence(fact))
             actions, _ = self.model.get_actions(features, target=label, training=False, phase=phase)
-            tf.print("Pred: ", env._tokens_to_sentence(actions.numpy()[0]))
             paddings = (
                 (0, 0), (0, tf.math.maximum(0, self.config.max_generated_question_length - tf.shape(actions)[1]))
             )
@@ -111,8 +106,6 @@ class RepeatQTrainer:
         return bleu_score
 
     def phase(self, current_epoch):
-        if self.config.restore_supervised_checkpoint:
-            return self.reinforce_phase
         if current_epoch < self.config.supervised_epochs:
             return self.supervised_phase
         return self.reinforce_phase
@@ -122,7 +115,12 @@ class RepeatQTrainer:
             actions, logits = self.model.get_actions(
                 features, target=target, training=True, phase=self.supervised_phase
             )
-            tf.py_function(self._debug_output, inp=(actions[0], features["base_question"][0], target[0]), Tout=tf.int32)
+            tf.py_function(self._debug_output, inp=(
+                actions[0],
+                features["base_question"][0],
+                target[0],
+                features["facts"][0][0]
+            ), Tout=tf.int32)
             mask = tf.cast(tf.not_equal(target, 0), dtype=tf.float32, name="seq_loss_mask")
             loss = tfa.seq2seq.sequence_loss(
                 logits=logits, targets=target, weights=mask, sum_over_batch=True, sum_over_timesteps=True,
@@ -145,19 +143,6 @@ class RepeatQTrainer:
             loss = self._policy_gradient_loss(
                 actions=actions, targets=targets, features=features, environment=environment, logits=logits
             )
-        return loss, tape
-
-        # Uses predicted sequence as ground truth in "teacher forcing" phase
-        # with tf.GradientTape() as tape:
-        #     actions, logits = self.model.get_actions(features, beams, training=True, phase=self.supervised_phase)
-        #     tf.py_function(
-        #         self._debug_output,
-        #         inp=(actions[0], features["base_question"][0], targets[0], beams[0]),
-        #         Tout=tf.int32
-        #     )
-        #     loss = self._policy_gradient_loss(
-        #         actions=actions, targets=targets, features=features, environment=environment, logits=logits
-        #     )
         return loss, tape
 
     def _policy_gradient_loss(self, actions, targets, features, environment, logits=None, action_probs=None):
@@ -206,14 +191,13 @@ class RepeatQTrainer:
         )
         return environment
 
-    def _debug_output(self, predictions, base_question, target, best_beam=None):
+    def _debug_output(self, predictions, base_question, target, fact):
         def _debug_output(tokens, name):
             tf.print(name, ": ", " ".join([self.reverse_voc[int(t)] for t in tokens if int(t) != 0]))
         _debug_output(predictions, "Predicted")
-        if best_beam is not None:
-            _debug_output(best_beam, "Best beam")
         _debug_output(target, "Rewritten")
         _debug_output(base_question, "Base question")
+        _debug_output(fact, "Fact")
         return 0
 
     @staticmethod

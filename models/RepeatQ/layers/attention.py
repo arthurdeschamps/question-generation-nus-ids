@@ -12,7 +12,7 @@ class Attention(tf.keras.layers.Layer):
             self.attention_matrix = tf.keras.layers.Dense(
                 units=attention_depth,
                 dtype=tf.float32,
-                name=f"{self.name}_additive_attention_matrix"
+                name=f"{self.name}_additive_attention_matrix",
             )
             self.attention_vector = tf.keras.layers.Dense(
                 units=1,
@@ -25,7 +25,7 @@ class Attention(tf.keras.layers.Layer):
     def build(self, input_shape):
         self.sequence_length = input_shape[1]
 
-    def call(self, attended_vectors, decoder_hidden_state=None, apply_softmax=True, **kwargs):
+    def call(self, attended_vectors, decoder_hidden_state=None, apply_softmax=True, training=None, **kwargs):
         assert attended_vectors is not None
         assert decoder_hidden_state is not None
         # We need to duplicate the decoder's hidden state to be able to compute the alignment scores for each
@@ -41,6 +41,6 @@ class Attention(tf.keras.layers.Layer):
             dense_result = self.attention_matrix(attention_input)
             scores = self.attention_vector(tf.math.tanh(dense_result))
             if apply_softmax:
-                return tf.math.softmax(scores)
+                return tf.math.softmax(scores, axis=-2)
             return scores
         raise NotImplementedError()
