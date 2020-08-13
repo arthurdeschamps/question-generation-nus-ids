@@ -72,7 +72,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
 
         return logits, (hidden_state, carry_state)
 
-    #@tf.function
+    @tf.function
     def get_actions(self, inputs, target, training, phase):
         from models.RepeatQ.trainer import RepeatQTrainer
         if training:
@@ -333,6 +333,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         return Attention(
             attention_style=self.config.question_attention,
             attention_depth=self.config.attention_depth,
+            attention_dropout_rate=self.config.attention_dropout_rate,
             name=name
         )
 

@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os
+import random
 from logging import info
 from typing import Dict
 import tensorflow as tf
@@ -66,8 +67,8 @@ def make_tf_dataset(base_questions, question_features, facts_list, facts_feature
         )
     )
     if shuffle:
-        ds = ds.shuffle(buffer_size=100)
-        #ds = ds.shuffle(buffer_size=len(base_questions), reshuffle_each_iteration=True)
+        #ds = ds.shuffle(buffer_size=100, reshuffle_each_iteration=True)
+        ds = ds.shuffle(buffer_size=len(base_questions), reshuffle_each_iteration=True)
     return ds.batch(batch_size=batch_size, drop_remainder=drop_remainder)
 
 
@@ -169,8 +170,8 @@ def translate(model_dir, data_dir, use_pos, use_ner):
     
     with open(save_path, mode='w') as pred_file:
         for feature, labels in data:
-            #preds = model.beam_search(feature, beam_search_size=5)
-            preds, _ = model.get_actions(feature, target=labels, training=True, phase=RepeatQTrainer.supervised_phase)
+            preds = model.beam_search(feature, beam_search_size=5)
+            #preds, _ = model.get_actions(feature, target=labels, training=True, phase=RepeatQTrainer.supervised_phase)
             for pred, label, base_question, facts in zip(preds, labels, feature["base_question"], feature["facts"]):
                 translated = to_string(pred)
                 tf.print("Base question: ", to_string(base_question))
@@ -299,6 +300,9 @@ def preprocess(data_dirpath, save_dir, ds_name, voc_size, pretrained_embeddings_
 
     _save_ds("test", ds_test)
     # Split train into train/dev
+    ds_train_items = list(ds_train.items())
+    random.shuffle(ds_train_items)
+    ds_train = dict(ds_train_items)
     d1 = int(0.9 * len(ds_train))
     ds_train_train = ds_train[:d1]
     ds_train_dev = ds_train[d1:]
@@ -342,7 +346,7 @@ if __name__ == '__main__':
     parser.add_argument("-learning_rate", type=float, required=False, 
                         help="Learning rate for the optimizer. Default is whatever default value is used by TF's Adam "
                              "optimizer implementation")
-    parser.add_argument("-dropout_rate", type=float, required=False, default=0.3, help="Dropout rate used on feed"
+    parser.add_argument("-dropout_rate", type=float, required=False, default=0.5, help="Dropout rate used on feed"
                                                                                        " forward layers' inputs")
     parser.add_argument("-recurrent_dropout_rate", type=float, required=False, default=0.1,
                         help="Recurrent dropout rate used on RNN inputs")

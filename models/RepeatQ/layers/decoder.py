@@ -19,7 +19,7 @@ class Decoder(tf.keras.layers.Layer):
         :param embedding_layer: Embedding layer to embed the tokens predicted by this decoder.
         :param question_attention_mechanism: Attention layer.
         :param facts_attention_mechanism: Attention layer.
-        :param units: Number of units in the recurrent unit.
+        :param units: Number of units in the LSTM decoder.
         :param recurrent_dropout: Recurrent dropout of the recurrent unit.
         :param dropout_rate: Dropout rate of the RNN (for linear transformations) and the dense layers.
         :param readout_size: Size of the readout state.
@@ -48,13 +48,16 @@ class Decoder(tf.keras.layers.Layer):
 
         # Output sub-layer weights
         self.W_r = tf.keras.layers.Dense(units=self.readout_size, name="decoder_W_r")
+        self.W_r_dropout = tf.keras.layers.Dropout(rate=dropout_rate, name="W_r_input_dropout")
         self.U_r = tf.keras.layers.Dense(units=self.readout_size, name="decoder_U_r")
+        self.U_r_dropout = tf.keras.layers.Dropout(rate=dropout_rate, name="U_r_input_dropout")
         self.V_r = tf.keras.layers.Dense(units=self.readout_size, name="decoder_V_r")
+        self.V_r_dropout = tf.keras.layers.Dropout(rate=dropout_rate, name="V_r_input_dropout")
 
         self.maxout = tfa.layers.Maxout(int(self.readout_size / 2))
 
         self.W_y = tf.keras.layers.Dense(units=self.vocabulary_size, name="decoder_W_y")
-        self.output_dropout = tf.keras.layers.Dropout(rate=dropout_rate, name="decoder_output_layer_dropout")
+        self.W_y_dropout = tf.keras.layers.Dropout(rate=dropout_rate, name="maxout_input_dropout")
 
     def build(self, input_shape):
         self.batch_dim = input_shape["base_question_embeddings"][0]
@@ -100,10 +103,11 @@ class Decoder(tf.keras.layers.Layer):
         return logits, (hidden_state, carry_state)
 
     def _output_layer(self, hidden_state, previous_input, base_question_attention_vector, training=None):
-        r_t = self.W_r(hidden_state) + self.U_r(previous_input) + self.V_r(base_question_attention_vector)
+        r_t = self.W_r(self.W_r_dropout(hidden_state)) + \
+              self.U_r(self.U_r_dropout(previous_input)) + \
+              self.V_r(self.V_r_dropout(base_question_attention_vector))
         maxout = self.maxout(r_t)
-       # logits = self.W_y(self.output_dropout(r_t, training=training))
-        logits = self.W_y(maxout, training=training)
+        logits = self.W_y(self.W_y_dropout(maxout, training=training))
         return logits
 
     def _compute_question_attention_vectors(self, base_question_embeddings, decoder_hidden_state, training=None):

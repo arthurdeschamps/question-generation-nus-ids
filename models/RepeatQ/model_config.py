@@ -5,10 +5,10 @@ class ModelConfiguration:
 
     def __init__(self,
                  nb_epochs=20,
-                 dropout_rate=0.3,
+                 dropout_rate=0.5,
+                 attention_dropout_rate=0.3,
                  recurrent_dropout=0.1,
                  fact_encoder_hidden_size=512,
-                 base_question_encoder_hidden_size=512,
                  max_generated_question_length=30,
                  question_attention_function="additive",
                  facts_attention_function="additive",
@@ -32,8 +32,8 @@ class ModelConfiguration:
         super(ModelConfiguration, self).__init__()
         self.recurrent_dropout = recurrent_dropout
         self.dropout_rate = dropout_rate
+        self.attention_dropout_rate = attention_dropout_rate
         self.fact_encoder_hidden_size = fact_encoder_hidden_size
-        self.base_question_encoder_hidden_size = base_question_encoder_hidden_size
         self.embeddings_pretrained = embeddings_pretrained
         self.embedding_size = embedding_size
         self.data_dir = data_dir
