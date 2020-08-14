@@ -164,7 +164,7 @@ if __name__ == '__main__':
         if model == "repeat_q_squad":
             with open(f"{REPEAT_Q_SQUAD_DATA_DIR}/test.data.json", mode='r') as test_file:
                 test_data = json.load(test_file)
-            references = np.array([d["target"] for d in test_data if len(d["target"]) > 0]).reshape((-1, 1))
+            references = np.array([d["target"] for d in test_data if len(d["target"]) > 0  and d["passage_id"] != -1]).reshape((-1, 1))
             candidates = np.array(pd.read_csv(
                 REPEAT_Q_SQUAD_OUTPUT_FILEPATH, header=None, sep='\n', comment=None)
             ).reshape((-1,))

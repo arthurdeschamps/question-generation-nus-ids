@@ -110,9 +110,9 @@ class RepeatQTrainer:
             return self.supervised_phase
         return self.reinforce_phase
 
-    def _supervised_step(self, features, target):
+    def _supervised_step(self, features, target, loss_fc=tf.keras.losses.SparseCategoricalCrossentropy(reduction=tf.keras.losses.Reduction.NONE)):
         with tf.GradientTape() as tape:
-            actions, logits = self.model.get_actions(
+            actions, pointer_softmax = self.model.get_actions(
                 features, target=target, training=True, phase=self.supervised_phase
             )
             tf.py_function(self._debug_output, inp=(
@@ -122,10 +122,25 @@ class RepeatQTrainer:
                 features["facts"][0][0]
             ), Tout=tf.int32)
             mask = tf.cast(tf.not_equal(target, 0), dtype=tf.float32, name="seq_loss_mask")
-            loss = tfa.seq2seq.sequence_loss(
-                logits=logits, targets=target, weights=mask, sum_over_batch=True, sum_over_timesteps=True,
-                average_across_timesteps=False, average_across_batch=False
+            # We need to slightly modify the targets so that the words that come from the base question are offset
+            # by voc_size, as the logits are the concatenation of the vocabulary logits with the logits for the
+            # base question (if words are being copied from there)
+            modified_targets = tf.where(
+                tf.not_equal(features["target_copy_indicator"], -1),
+                len(self.vocabulary) + features["target_copy_indicator"],
+                target
             )
+            num_classes = pointer_softmax.get_shape()[-1]
+            flattened_targets = tf.reshape(modified_targets, (-1,))
+            flattened_probs = tf.reshape(pointer_softmax, (-1, num_classes))
+            flattened_mask = tf.reshape(mask, (-1,))
+            losses = loss_fc(flattened_targets, flattened_probs)
+            loss = tf.reduce_sum(flattened_mask * losses, axis=-1) / tf.reduce_sum(flattened_mask)
+            # loss = tfa.seq2seq.sequence_loss(
+            #     logits=pointer_softmax, targets=target, weights=mask, sum_over_batch=True, sum_over_timesteps=True,
+            #     average_across_timesteps=False, average_across_batch=False
+            # )
+
         return loss, tape
 
     def _reinforce_step(self, features, targets, environment):
@@ -159,7 +174,6 @@ class RepeatQTrainer:
         log_probs = tf.math.log(action_probs, name="log_probs")
         mask = tf.cast(tf.not_equal(actions, 0), dtype=tf.float32, name="reinforce_mask")
 
-        tf.print(log_probs[0])
         for i in tf.range(self.config.batch_size):
             episode_actions = actions[i]
             episode_reward = tf.py_function(

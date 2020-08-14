@@ -27,6 +27,7 @@ class Decoder(tf.keras.layers.Layer):
         :param bos_token: Beginning of sentence token (it's id).
         """
         super(Decoder, self).__init__(**kwargs)
+        self.supports_masking = True
         self.embedding_layer = embedding_layer
         self.lstm_cell = tf.keras.layers.LSTMCell(units, recurrent_dropout=recurrent_dropout, dropout=dropout_rate)
         self.hidden_size = units
@@ -63,9 +64,11 @@ class Decoder(tf.keras.layers.Layer):
         self.batch_dim = input_shape["base_question_embeddings"][0]
         self.sequence_length = input_shape["base_question_embeddings"][1]
 
-    def call(self, inputs, training=None, **kwargs):
+    def call(self, inputs, training=None, mask=None, **kwargs):
         base_question_embeddings = inputs["base_question_embeddings"]
+        base_question_mask = mask["base_question"]
         facts_encodings = inputs["facts_encodings"]
+        facts_mask = mask["facts"]
 
         batch_dim = base_question_embeddings.shape[0]
 
@@ -81,12 +84,12 @@ class Decoder(tf.keras.layers.Layer):
         )
 
         # Compute question attention vectors
-        base_question_attention_vector = self._compute_question_attention_vectors(
-            base_question_embeddings, hidden_state, training=training
+        base_question_attention_vector, base_question_attention_logits = self._compute_question_attention_vectors(
+            base_question_embeddings, hidden_state, mask=base_question_mask, training=training
         )
         # Compute fact attention vectors
         fact_attention_vector = self._compute_facts_attention_vectors(
-            facts_encodings, hidden_state, training=training
+            facts_encodings, hidden_state, mask=facts_mask, training=training
         )
 
         # Create the decoder's next input
@@ -100,7 +103,7 @@ class Decoder(tf.keras.layers.Layer):
 
         # Compute logits
         logits = self._output_layer(hidden_state, decoder_input, base_question_attention_vector, training=training)
-        return logits, (hidden_state, carry_state)
+        return logits, (hidden_state, carry_state), (base_question_attention_vector, base_question_attention_logits)
 
     def _output_layer(self, hidden_state, previous_input, base_question_attention_vector, training=None):
         r_t = self.W_r(self.W_r_dropout(hidden_state)) + \
@@ -110,34 +113,46 @@ class Decoder(tf.keras.layers.Layer):
         logits = self.W_y(self.W_y_dropout(maxout, training=training))
         return logits
 
-    def _compute_question_attention_vectors(self, base_question_embeddings, decoder_hidden_state, training=None):
-        base_question_attention_weights = self.base_question_attention(
+    def _compute_question_attention_vectors(self, base_question_embeddings, decoder_hidden_state, mask, training=None):
+        base_question_attention_logits = self.base_question_attention(
             base_question_embeddings,
             decoder_hidden_state=decoder_hidden_state,
-            training=training
+            apply_softmax=False,
+            training=training,
+            mask=mask
         )
+        base_question_attention_weights = tf.math.softmax(base_question_attention_logits, axis=-2, name="q_attention")
         base_question_attention_vectors = tf.reduce_sum(
             tf.multiply(base_question_attention_weights, base_question_embeddings),
             axis=1,
-            name="base_question_attention_vectors"
+            name="base_question_attention_vector"
         )
-        return base_question_attention_vectors
+        return base_question_attention_vectors, tf.squeeze(base_question_attention_logits, axis=-1)
 
-    def _compute_facts_attention_vectors(self, facts_encodings, decoder_hidden_state, training=None):
+    def _compute_facts_attention_vectors(self, facts_encodings, decoder_hidden_state, mask, training=None):
         # Collates the batch dimension and the fact index dimension in order to compute attention for each
         # fact separately
         old_shape = tf.shape(facts_encodings)
+
+        def flattened_shape(t):
+            t_shape = t.get_shape()
+            return tf.concat(([t_shape[0] * t_shape[1]], t_shape[2:]), axis=0)
         facts_encodings = tf.reshape(
-            facts_encodings,
-            shape=tf.concat(([old_shape[0] * old_shape[1]], old_shape[2:]), axis=0),
-            name="decoder_flattened_fact_encodings"
+            facts_encodings, shape=flattened_shape(facts_encodings), name="decoder_flattened_fact_encodings"
+        )
+        mask = tf.reshape(
+            mask, shape=flattened_shape(mask), name="facts_mask"
         )
         # Need to duplicate the decoder's hidden state to fit the new "batch size"
         decoder_hidden_state = tf.repeat(
             decoder_hidden_state, repeats=old_shape[1], axis=0, name="decoder_hidden_state_duplicated"
         )
         facts_attention_weights = self.facts_attention_mechanism(
-            facts_encodings, decoder_hidden_state=decoder_hidden_state, apply_softmax=False, training=training
+            facts_encodings,
+            decoder_hidden_state=decoder_hidden_state,
+            apply_softmax=False,
+            training=training,
+            mask=mask
         )
         # Transform shape into (batch_size, number of facts * fact sequence length) so we can subsequently
         # get the top m attention scores for each batch

@@ -16,13 +16,14 @@ from defs import UNKNOWN_TOKEN, REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_RAW_DATASETS, 
 from models.RepeatQ.model import RepeatQ
 from models.RepeatQ.model_config import ModelConfiguration
 from models.RepeatQ.trainer import RepeatQTrainer
+from mytools import remove_adjacent_duplicate_grams
 
 
-def make_tf_dataset(base_questions, question_features, facts_list, facts_features, targets, passage_ids,
-                    batch_size=1, shuffle=True, drop_remainder=True):
+def make_tf_dataset(base_questions, question_features, facts_list, facts_features, targets, targets_copy_indicator, 
+                    passage_ids, batch_size=1, shuffle=True, drop_remainder=True):
     def _gen():
-        for base_question, q_features, facts, f_features, target, passage_id in \
-                zip(base_questions, question_features, facts_list, facts_features, targets, passage_ids):
+        for base_question, q_features, facts, f_features, target, target_copy_indicator, passage_id in \
+                zip(base_questions, question_features, facts_list, facts_features, targets, targets_copy_indicator, passage_ids):
             if passage_id == -1:
                 tf.print("Skipping organic data")
                 continue
@@ -46,12 +47,14 @@ def make_tf_dataset(base_questions, question_features, facts_list, facts_feature
                 # Creates 0-dimensional features (equivalent to not using them)
                 f_features = [[[] for _ in range(tf.shape(facts)[1])] for _ in range(tf.shape(facts)[0])]
                 q_features = [[] for _ in range(tf.shape(base_question)[0])]
+            # TODO remove the 3 facts limit (not enough computational power at the moment)
             yield {
-                "facts": facts, 
-                "facts_features": tf.cast(f_features, dtype=tf.float32),
+                "facts": facts[:3], 
+                "facts_features": tf.cast(f_features[:3], dtype=tf.float32),
                 "base_question": base_question,
                 "base_question_features": tf.cast(q_features, dtype=tf.float32),
-                "passage_id": passage_id
+                "passage_id": passage_id,
+                "target_copy_indicator": target_copy_indicator
             }, target
 
     ds = tf.data.Dataset.from_generator(
@@ -62,7 +65,8 @@ def make_tf_dataset(base_questions, question_features, facts_list, facts_feature
                 "facts_features": tf.float32, 
                 "base_question": tf.int32, 
                 "base_question_features": tf.float32,
-                "passage_id": tf.int32
+                "passage_id": tf.int32,
+                "target_copy_indicator": tf.int32
             }, tf.int32
         )
     )
@@ -76,20 +80,22 @@ def get_data(data_dir, vocabulary, feature_vocabulary, data_limit, batch_size):
     info("Preparing dataset...")
     datasets = {}
     for mode in ("train", "dev", "test"):
-        base_questions, question_features, facts, fact_features, targets, passage_ids = RepeatQDataset(
-            f"{data_dir}/{mode}.data.json",
-            vocabulary=vocabulary,
-            feature_vocab=feature_vocabulary,
-            data_limit=data_limit,
-            use_ner_features=use_ner,
-            use_pos_features=use_pos
-        ).get_dataset()
+        base_questions, question_features, facts, fact_features, targets, targets_copy_indicator, passage_ids = \
+            RepeatQDataset(
+                f"{data_dir}/{mode}.data.json",
+                vocabulary=vocabulary,
+                feature_vocab=feature_vocabulary,
+                data_limit=data_limit,
+                use_ner_features=use_ner,
+                use_pos_features=use_pos
+            ).get_dataset()
         datasets[mode] = make_tf_dataset(
             base_questions=base_questions,
             question_features=question_features,
             facts_list=facts,
             facts_features=fact_features,
             targets=targets,
+            targets_copy_indicator=targets_copy_indicator,
             passage_ids=passage_ids,
             batch_size=batch_size,
             shuffle=mode != "test",
@@ -170,10 +176,10 @@ def translate(model_dir, data_dir, use_pos, use_ner):
     
     with open(save_path, mode='w') as pred_file:
         for feature, labels in data:
-            preds = model.beam_search(feature, beam_search_size=5)
+            preds = model.beam_search(feature, beam_search_size=10)
             #preds, _ = model.get_actions(feature, target=labels, training=True, phase=RepeatQTrainer.supervised_phase)
             for pred, label, base_question, facts in zip(preds, labels, feature["base_question"], feature["facts"]):
-                translated = to_string(pred)
+                translated = remove_adjacent_duplicate_grams(to_string(pred))
                 tf.print("Base question: ", to_string(base_question))
                 for fact in facts:
                     tf.print("Fact: ", to_string(fact))

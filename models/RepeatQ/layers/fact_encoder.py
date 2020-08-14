@@ -33,3 +33,6 @@ class FactEncoder(tf.keras.layers.Layer):
         )
         return hidden_states
 
+    def compute_mask(self, inputs, mask=None):
+        return tf.not_equal(inputs, 0)
+

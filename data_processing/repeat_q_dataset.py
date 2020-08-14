@@ -57,6 +57,8 @@ class RepeatQDataset:
         facts_list = []
         facts_features = []
         targets = []
+        # Indicator of if a target word comes from the base question and where in the base question
+        targets_question_copy_indicator = []
         passage_ids = []
         max_fact_length = 0
         max_nb_facts = 0
@@ -66,6 +68,9 @@ class RepeatQDataset:
             passage_ids.append(example.passage_id)
             targets.append(self.words_to_ids(example.rephrased_question.split()))
             base_questions.append(self.words_to_ids(example.base_question.split()))
+            # Index in the base question if the word comes from the base question, -1 otherwise
+            targets_question_copy_indicator.append([base_questions[-1].index(word) if word in base_questions[-1]
+                                                    else -1 for word in targets[-1]])
             base_questions_features.append(self.features_to_ids(example.base_question_features))
             facts = [self.words_to_ids(fact.split(' ')) for fact in example.facts]
             facts_features.append([self.features_to_ids(fact) for fact in example.facts_features])
@@ -77,8 +82,10 @@ class RepeatQDataset:
             return base_questions, facts_list, targets
         base_questions = self.sequence_padding(base_questions)
         targets = self.sequence_padding(targets)
+        targets_question_copy_indicator = self.sequence_padding(targets_question_copy_indicator)
         facts_list = np.array(self.matrix_padding(facts_list, max_length=128, max_width=max_nb_facts))
-        return base_questions, base_questions_features, facts_list, facts_features, targets, passage_ids
+        return base_questions, base_questions_features, facts_list, facts_features, targets, \
+               targets_question_copy_indicator, passage_ids
 
     def words_to_ids(self, sentence: List[str]):
         return [self.vocab.get(word.lower(), self.vocab[self.unk_token]) for word in sentence]
