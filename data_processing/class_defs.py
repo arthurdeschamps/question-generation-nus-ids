@@ -83,10 +83,12 @@ class SquadMultiQAExample(JsonParsable):
 
 class RepeatQFeature:
 
-    def __init__(self, pos_tags, entity_tags):
-            super(RepeatQFeature, self).__init__()
-            self.pos_tags = pos_tags
-            self.entity_tags = entity_tags
+    def __init__(self, pos_tags, entity_tags, ner, letter_cases):
+        super(RepeatQFeature, self).__init__()
+        self.pos_tags = pos_tags
+        self.entity_tags = entity_tags
+        self.ner = ner
+        self.letter_cases = letter_cases
 
 
 class RepeatQExample(JsonParsable):
@@ -112,12 +114,14 @@ class RepeatQExample(JsonParsable):
         return [RepeatQExample(
             base_question=example["base_question"],
             base_question_features=RepeatQFeature(
-                pos_tags=example["base_question_pos_tags"], entity_tags=example["base_question_entity_tags"]
+                pos_tags=example["base_question_pos_tags"], entity_tags=example["base_question_entity_tags"],
+                ner=example["base_question_ner"], letter_cases=example["base_question_letter_cases"]
             ),
             facts=example["facts"],
             facts_features=[RepeatQFeature(
-                pos_tags=pos, entity_tags=entity
-            ) for pos, entity in zip(example["facts_pos_tags"], example["facts_entity_tags"])],
+                pos_tags=pos, entity_tags=entity, ner=ner, letter_cases=cases
+            ) for pos, entity, ner, cases in zip(example["facts_pos_tags"], example["facts_entity_tags"],
+                                                 example["facts_ner"], example["facts_letter_cases"])],
             rephrased_question=example["target"],
             passage_id=example["passage_id"]
         ) for example in json]

@@ -11,6 +11,7 @@ import stanza
 from stanza import Document
 from tqdm import tqdm
 
+from data_processing.class_defs import RepeatQExample
 from data_processing.mpqg_dataset import MPQGDataset
 from data_processing.parse import read_medquad_raw_dataset, read_squad_dataset, read_squad_facts_files, \
     read_squad_rewrites_files, read_squad_qmap_files, read_squad_rewrites_human_made, get_squad_question_to_answers_map
@@ -19,9 +20,10 @@ from defs import NQG_MODEL_DIR, NQG_DATA_HOME, MEDQUAD_DIR, MEDQUAD_DEV, MEDQUAD
     MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_RAW_DATASET_FILEPATH, HOTPOT_QA_DEV_JSON, \
     HOTPOT_QA_DEV_TARGETS_PATH, \
     REPEAT_Q_RAW_DATASETS, SQUAD_FACTS_TRAIN, SQUAD_FACTS_DEV, SQUAD_REWRITES_DEV, SQUAD_REWRITES_TRAIN, \
-    ASS2S_PROCESSED_SQUAD_MPQG_DATA, SQUAD_REWRITES_AMAZON_TURK_1_JSON
+    ASS2S_PROCESSED_SQUAD_MPQG_DATA, SQUAD_REWRITES_AMAZON_TURK_1_JSON, REPEAT_Q_SQUAD_DATA_DIR, \
+    SQUAD_REWRITES_AMAZON_TURK_2_JSON, NQG_SQUAD_DATASET
 from data_processing.nqg_dataset import NQGDataset
-from data_processing.nqg_pre_processing import NQGDataPreprocessor
+from data_processing.pre_processing import NQGDataPreprocessor
 import numpy as np
 
 
@@ -265,7 +267,7 @@ def generate_hotpot_targets(json_data_path, savepath):
 
 
 def generate_repeat_q_squad_raw():
-    os.environ["CUDA_VISIBLE_DEVICES"] = "8"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     nlp = stanza.Pipeline(lang='en', processors='tokenize,pos,ner')
 
     # Synthetic data (created through hard-coded rules)
@@ -278,6 +280,7 @@ def generate_repeat_q_squad_raw():
 
     # Organic data (amazon turk)
     org_examples = read_squad_rewrites_human_made(dirpath=SQUAD_REWRITES_AMAZON_TURK_1_JSON)
+    org_examples.extend(read_squad_rewrites_human_made(dirpath=SQUAD_REWRITES_AMAZON_TURK_2_JSON))
     org_examples_train = org_examples[:int(len(org_examples)*0.8)]
     org_examples_test = org_examples[int(len(org_examples)*0.8):]
 
@@ -326,6 +329,9 @@ def generate_repeat_q_squad_raw():
                               for i in range(len(facts_docs))]
         return " ".join(q_ent_tags), [" ".join(f) for f in facts_ent_tags]
 
+    def _get_cases(doc):
+        return " ".join(["UP" if word.text[0].isupper() else "LOW" for word in doc.iter_words()])
+
     def _make_example(_base_question, _rewritten_question, _facts, _answers, _passage_id):
         try:
             # Create example placeholders and filter out irrelevant question words for future word matching
@@ -337,9 +343,16 @@ def generate_repeat_q_squad_raw():
                 "base_question": _get_tokens(analyzed_question),
                 "base_question_pos_tags": _get_pos_sequence(analyzed_question),
                 "base_question_entity_tags": base_question_entity_tags,
+                "base_question_letter_cases": _get_cases(analyzed_question),
+                "base_question_ner": NQGDataPreprocessor.create_ner_sequence(
+                    True, list([_ for _ in analyzed_question.iter_words()])
+                ),
                 "facts": [_get_tokens(fact) for fact in analyzed_facts],
                 "facts_entity_tags": facts_entity_tags,
                 "facts_pos_tags": [_get_pos_sequence(fact) for fact in analyzed_facts],
+                "facts_letter_cases": [_get_cases(doc) for doc in analyzed_facts],
+                "facts_ner": [NQGDataPreprocessor.create_ner_sequence(True, [_ for _ in fact.iter_words()])
+                              for fact in analyzed_facts],
                 "target": _get_tokens(analyzed_target),
                 "passage_id": _passage_id,
             }
@@ -384,6 +397,39 @@ def generate_repeat_q_squad_raw():
             json.dump(ds, f, indent=4)
 
 
+def repeat_q_to_nqg_squad():
+    data_dir = REPEAT_Q_SQUAD_DATA_DIR
+    target_dir = f"{NQG_SQUAD_DATASET}_repeat_q"
+
+    os.mkdir(target_dir)
+
+    def _read_data(mode):
+        with open(f"{data_dir}/{mode}.data.json", mode='r') as f:
+            ds = RepeatQExample.from_json(json.load(f))
+            return ds
+
+    for mode in ("train", "dev", "test"):
+        sep_tok = "GSDASSEP"
+        bios, ners, poss, sources, targets, cases = [], [], [], [], [], []
+        for data in _read_data(mode):
+            sources.append(f"{data.base_question} {sep_tok.lower()} {' '.join([fact for fact in data.facts])}")
+            targets.append(data.rephrased_question)
+            ners.append(
+                f"{data.base_question_features.ner} {sep_tok} {' '.join([feat.ner for feat in data.facts_features])}")
+            poss.append(
+                f"{data.base_question_features.pos_tags} {sep_tok} {' '.join([feat.pos_tags for feat in data.facts_features])}")
+            cases.append(
+                f"{data.base_question_features.letter_cases} {sep_tok} {' '.join([feat.letter_cases for feat in data.facts_features])}")
+            bios.append(
+                f"{data.base_question_features.entity_tags} {sep_tok} {' '.join([feat.entity_tags for feat in data.facts_features])}")
+
+        os.mkdir(f"{target_dir}/{mode}")
+        for data_name, content in (("source.txt", sources), ("target.txt", targets), ("bio", bios), ("case", cases),
+                                   ("ner", ners), ("pos", poss)):
+            fname = f"{target_dir}/{mode}/data.txt.{data_name}"
+            np.savetxt(fname, content, fmt="%s")
+
+
 if __name__ == '__main__':
     import argparse
 
@@ -423,6 +469,9 @@ if __name__ == '__main__':
     elif args.dataset_name == "repeat_q_squad":
         generate_repeat_q_squad_raw()
         info("Raw SQuAD dataset for RepeatQ generated.")
+    elif args.dataset_name == "nqg_repeat_q_squad":
+        repeat_q_to_nqg_squad()
+        info("RepeatQ SQuAD for NQG generated.")
     else:
         raise ValueError("Non-existing dataset type")
     print("Done")

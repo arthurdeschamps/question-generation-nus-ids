@@ -7,8 +7,8 @@ class ModelConfiguration:
                  nb_epochs=20,
                  dropout_rate=0.5,
                  attention_dropout_rate=0.3,
-                 recurrent_dropout=0.1,
-                 fact_encoder_hidden_size=512,
+                 recurrent_dropout=0.0,
+                 fact_encoder_hidden_size=256,
                  max_generated_question_length=30,
                  question_attention_function="additive",
                  facts_attention_function="additive",
@@ -73,6 +73,10 @@ class ModelConfiguration:
 
     def with_episodes(self, nb_episodes):
         self.nb_episodes = nb_episodes
+        return self
+
+    def with_attention_dropout(self, attention_dropout):
+        self.attention_dropout_rate = attention_dropout
         return self
 
     def with_dropout_rate(self, dropout_rate):

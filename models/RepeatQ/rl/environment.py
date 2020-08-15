@@ -1,5 +1,3 @@
-from collections import namedtuple
-from typing import List
 import nltk.translate.bleu_score as bleu
 from nltk.translate.meteor_score import meteor_score
 from tensorflow import Tensor

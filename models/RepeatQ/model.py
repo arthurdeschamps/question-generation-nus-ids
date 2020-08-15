@@ -1,7 +1,6 @@
 import functools
 from collections import namedtuple
 import tensorflow as tf
-import tensorflow_probability as tfp
 from tensorflow import Tensor
 
 from defs import REPEAT_Q_EMBEDDINGS_FILENAME, PAD_TOKEN, REPEAT_Q_TRAIN_CHECKPOINTS_DIR
@@ -17,7 +16,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
 
     NetworkState = namedtuple("NetworkState", (
         "base_question",
-        "base_question_embeddings",
+        "base_question_encodings",
         "facts",
         "facts_encodings",
         "decoder_states",
@@ -48,6 +47,14 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         self.U_q_copy = tf.keras.layers.Dense(units=1, name="V_question_copy")
         self.U_q_copy_dropout = tf.keras.layers.Dropout(self.config.dropout_rate, name="V_question_copy_dropout")
 
+        # Base question encoder
+        self.base_question_encoder = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
+            units=int(self.config.decoder_hidden_size / 2),
+            recurrent_dropout=1e-9,
+            dropout=0.5,
+            return_sequences=True,
+        ), merge_mode="concat", name="base_question_encoder")
+
         if config.restore_supervised_checkpoint:
             path = config.supervised_model_checkpoint_path
             if path is None:
@@ -62,7 +69,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
 
         voc_logits, (hidden_state, carry_state), (question_att_vector, question_copy_logits) = self.decoder(
             inputs={
-                "base_question_embeddings": inputs.base_question_embeddings,
+                "base_question_encodings": inputs.base_question_encodings,
                 "facts_encodings": inputs.facts_encodings,
                 "previous_token_embedding": self.embedding_layer.embed_words(inputs.observation),
                 "decoder_state": inputs.decoder_states
@@ -91,6 +98,26 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         carry_state = tf.where(mask, carry_state, inputs.decoder_states[1])
 
         return voc_logits, question_copy_logits, q_copy_prob, (hidden_state, carry_state)
+
+    def get_initial_state(self, base_question, base_question_features, facts, facts_features, batch_size, training=None):
+        base_question_embeddings = self.embedding_layer({"sentence": base_question, "features": base_question_features})
+        base_question_encodings = self.base_question_encoder(base_question_embeddings)
+        facts_embeddings = self.embedding_layer({"sentence": facts, "features": facts_features})
+        facts_encodings = self.fact_encoder(facts_embeddings, training=training)
+
+        network_state = RepeatQ.NetworkState(
+            base_question=base_question,
+            base_question_encodings=base_question_encodings,
+            facts=facts,
+            facts_encodings=facts_encodings,
+            decoder_states=(
+                base_question_encodings[:, -1],  # Use the last hidden state of the question encoder as initial state
+                tf.zeros(shape=(batch_size, self.config.decoder_hidden_size))
+            ),
+            observation=tf.zeros(shape=(batch_size,), dtype=tf.int32),
+            is_first_step=True
+        )
+        return network_state
 
     @tf.function
     def get_actions(self, inputs, target, training, phase):
@@ -172,7 +199,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
 
             network_state = RepeatQ.NetworkState(
                 base_question=network_state.base_question,
-                base_question_embeddings=network_state.base_question_embeddings,
+                base_question_encodings=network_state.base_question_encodings,
                 facts=network_state.facts,
                 facts_encodings=network_state.facts_encodings,
                 decoder_states=decoder_states,
@@ -223,7 +250,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             batch_size=base_question.get_shape()[0],
             training=training
         )
-        base_question_embeddings = batchify(initial_network_state.base_question_embeddings, name="base_q_embds")
+        base_question_encodings = batchify(initial_network_state.base_question_encodings, name="base_q_embds")
         base_question = batchify(initial_network_state.base_question, name="base_q")
         facts_encodings = batchify(initial_network_state.facts_encodings, "facts_encodings")
         facts = batchify(initial_network_state.facts, name="facts")
@@ -260,7 +287,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         for it in tf.range(beam_length):
             beam_network_state = RepeatQ.NetworkState(
                 base_question=base_question,
-                base_question_embeddings=base_question_embeddings,
+                base_question_encodings=base_question_encodings,
                 facts=facts,
                 facts_encodings=facts_encodings,
                 decoder_states=decoder_states,
@@ -272,12 +299,12 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             # [batch size, beam size, vocabulary size]
             voc_logits = recover_dims(voc_logits)
             q_copy_logits = recover_dims(q_copy_logits)
+            q_copy_prob = recover_dims(q_copy_prob)
             # top_probs: [batch size, beam size, beam size]
             top_probs, top_words = RepeatQ.get_output_tokens(
                 voc_logits, q_copy_logits, q_copy_prob, recover_dims(base_question), top_k=beam_search_size
             )
             decoder_states = tuple(recover_dims(s) for s in decoder_states)
-            #top_probs, top_words = tf.math.top_k(distributions, k=beam_search_size)
             # [batch size, beam size, 1] -> [batch size, beam size, beam_size]
             beam_log_probs = tf.repeat(beam_log_probs, repeats=beam_search_size, axis=-1)
             top_probs = tf.math.add(tf.math.log(top_probs), beam_log_probs)
@@ -336,25 +363,6 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         if return_probs:
             return best_beams, best_beam_probs
         return best_beams
-
-    def get_initial_state(self, base_question, base_question_features, facts, facts_features, batch_size, training=None):
-        base_question_embeddings = self.embedding_layer({"sentence": base_question, "features": base_question_features})
-        facts_embeddings = self.embedding_layer({"sentence": facts, "features": facts_features})
-        facts_encodings = self.fact_encoder(facts_embeddings, training=training)
-
-        network_state = RepeatQ.NetworkState(
-            base_question=base_question,
-            base_question_embeddings=base_question_embeddings,
-            facts=facts,
-            facts_encodings=facts_encodings,
-            decoder_states=(
-                tf.zeros(shape=(batch_size, self.config.decoder_hidden_size)),
-                tf.zeros(shape=(batch_size, self.config.decoder_hidden_size))
-            ),
-            observation=tf.zeros(shape=(batch_size,), dtype=tf.int32),
-            is_first_step=True
-        )
-        return network_state
 
     @staticmethod
     def get_output_tokens(voc_logits, base_question_logits, question_copy_prob, base_question, top_k=1):

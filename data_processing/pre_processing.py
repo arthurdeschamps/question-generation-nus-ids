@@ -57,17 +57,20 @@ class NQGDataPreprocessor:
     def create_ner_sequences(self, enhanced_ner):
         ner_sequences = []
         for passage in self.passages:
-            # Takes care of creating the NER sequence
-            ner_sequence = np.full(shape=len(passage), fill_value='O', dtype=object)
-            i = 0
-            for word in passage:
-                token_ner = word.parent._ner if len(word.parent._ner) == 1 else word.parent._ner[2:]
-                # Takes either the most recent NER tag or the ones used in the original NQG paper
-                ner_sequence[i] = token_ner if enhanced_ner else self._ner_mapping(token_ner)
-                i += 1
-            ner_sequences.append(array_to_string(ner_sequence))
-
+            ner_sequences.append(NQGDataPreprocessor.create_ner_sequence(enhanced_ner, passage, self._ner_mapping))
         return np.array(ner_sequences)
+
+    @staticmethod
+    def create_ner_sequence(enhanced_ner, passage, ner_mapping=None):
+        # Takes care of creating the NER sequence
+        ner_sequence = np.full(shape=len(passage), fill_value='O', dtype=object)
+        i = 0
+        for word in passage:
+            token_ner = word.parent._ner if len(word.parent._ner) == 1 else word.parent._ner[2:]
+            # Takes either the most recent NER tag or the ones used in the original NQG paper
+            ner_sequence[i] = token_ner if enhanced_ner else ner_mapping(token_ner)
+            i += 1
+        return array_to_string(ner_sequence)
 
     def create_pos_sequences(self):
         pos_sequences = []

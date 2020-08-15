@@ -8,11 +8,13 @@ class FactEncoder(tf.keras.layers.Layer):
     def __init__(self, encoder_hidden_size, recurrent_dropout, dropout_rate, *args, **kwargs):
         super(FactEncoder, self).__init__(*args, **kwargs)
         self.supports_masking = True
+        if recurrent_dropout == 0.0:
+            recurrent_dropout = 1e-9  # This is required as using 0.0 currently generates an error in Tensorflow
         self.encoder = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
             units=encoder_hidden_size,
             recurrent_dropout=recurrent_dropout,
             dropout=dropout_rate,
-            return_sequences=True
+            return_sequences=True,
         ), merge_mode="concat")
 
     def call(self, facts, training=None, mask=None, **kwargs):

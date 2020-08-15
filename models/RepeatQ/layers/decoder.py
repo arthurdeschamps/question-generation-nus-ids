@@ -43,7 +43,6 @@ class Decoder(tf.keras.layers.Layer):
         self.embedding_layer = embedding_layer
         self.bos_token = bos_token
         self.facts_encodings = None
-        self.base_question_embeddings = None
         self.batch_dim = None
         self.sequence_length = None
 
@@ -61,16 +60,16 @@ class Decoder(tf.keras.layers.Layer):
         self.W_y_dropout = tf.keras.layers.Dropout(rate=dropout_rate, name="maxout_input_dropout")
 
     def build(self, input_shape):
-        self.batch_dim = input_shape["base_question_embeddings"][0]
-        self.sequence_length = input_shape["base_question_embeddings"][1]
+        self.batch_dim = input_shape["base_question_encodings"][0]
+        self.sequence_length = input_shape["base_question_encodings"][1]
 
     def call(self, inputs, training=None, mask=None, **kwargs):
-        base_question_embeddings = inputs["base_question_embeddings"]
+        base_question_encodings = inputs["base_question_encodings"]
         base_question_mask = mask["base_question"]
         facts_encodings = inputs["facts_encodings"]
         facts_mask = mask["facts"]
 
-        batch_dim = base_question_embeddings.shape[0]
+        batch_dim = base_question_encodings.shape[0]
 
         hidden_state, carry_state = tf.cond(
             tf.equal(tf.size(inputs["decoder_state"][0]), 0),
@@ -85,7 +84,7 @@ class Decoder(tf.keras.layers.Layer):
 
         # Compute question attention vectors
         base_question_attention_vector, base_question_attention_logits = self._compute_question_attention_vectors(
-            base_question_embeddings, hidden_state, mask=base_question_mask, training=training
+            base_question_encodings, hidden_state, mask=base_question_mask, training=training
         )
         # Compute fact attention vectors
         fact_attention_vector = self._compute_facts_attention_vectors(
@@ -113,9 +112,9 @@ class Decoder(tf.keras.layers.Layer):
         logits = self.W_y(self.W_y_dropout(maxout, training=training))
         return logits
 
-    def _compute_question_attention_vectors(self, base_question_embeddings, decoder_hidden_state, mask, training=None):
+    def _compute_question_attention_vectors(self, base_question_encodings, decoder_hidden_state, mask, training=None):
         base_question_attention_logits = self.base_question_attention(
-            base_question_embeddings,
+            base_question_encodings,
             decoder_hidden_state=decoder_hidden_state,
             apply_softmax=False,
             training=training,
@@ -123,7 +122,7 @@ class Decoder(tf.keras.layers.Layer):
         )
         base_question_attention_weights = tf.math.softmax(base_question_attention_logits, axis=-2, name="q_attention")
         base_question_attention_vectors = tf.reduce_sum(
-            tf.multiply(base_question_attention_weights, base_question_embeddings),
+            tf.multiply(base_question_attention_weights, base_question_encodings),
             axis=1,
             name="base_question_attention_vector"
         )

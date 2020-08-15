@@ -25,7 +25,6 @@ def make_tf_dataset(base_questions, question_features, facts_list, facts_feature
         for base_question, q_features, facts, f_features, target, target_copy_indicator, passage_id in \
                 zip(base_questions, question_features, facts_list, facts_features, targets, targets_copy_indicator, passage_ids):
             if passage_id == -1:
-                tf.print("Skipping organic data")
                 continue
             if use_pos or use_ner:
                 f_features = [[feature[:tf.shape(facts)[1]] for feature in fact_features] for fact_features in f_features]
@@ -114,7 +113,7 @@ def build_vocabulary(vocabulary_path):
 
 
 def train(data_dir, data_limit, batch_size, learning_rate, epochs, supervised_epochs, checkpoint_name, save_model, 
-          nb_episodes, recurrent_dropout, dropout_rate, use_pos, use_ner):
+          nb_episodes, recurrent_dropout, attention_dropout, dropout_rate, use_pos, use_ner):
     config = ModelConfiguration.new()\
         .with_batch_size(batch_size)\
         .with_epochs(epochs)\
@@ -122,6 +121,7 @@ def train(data_dir, data_limit, batch_size, learning_rate, epochs, supervised_ep
         .with_saving_model(save_model)\
         .with_episodes(nb_episodes)\
         .with_dropout_rate(dropout_rate)\
+        .with_attention_dropout(attention_dropout)\
         .with_recurrent_dropout(recurrent_dropout)\
         .with_pos_features(use_pos)\
         .with_ner_features(use_ner)
@@ -141,7 +141,7 @@ def train(data_dir, data_limit, batch_size, learning_rate, epochs, supervised_ep
 
 
 def translate(model_dir, data_dir, use_pos, use_ner):
-    config = ModelConfiguration.new().with_batch_size(1).with_pos_features(use_pos).with_ner_features(use_ner)
+    config = ModelConfiguration.new().with_batch_size(32).with_pos_features(use_pos).with_ner_features(use_ner)
     
     save_path = REPEAT_Q_SQUAD_OUTPUT_FILEPATH
     if not os.path.exists(os.path.dirname(save_path)):
@@ -152,7 +152,6 @@ def translate(model_dir, data_dir, use_pos, use_ner):
     vocabulary = build_vocabulary(config.vocabulary_path)
     reverse_voc = _reverse_voc(vocabulary)
     feature_voc = build_vocabulary(config.feature_vocabulary_path)
-    reverse_feature_voc = _reverse_voc(feature_voc)
     data = get_data(
         data_dir=data_dir, 
         vocabulary=vocabulary, 
@@ -167,17 +166,9 @@ def translate(model_dir, data_dir, use_pos, use_ner):
         tokens = tokens.numpy()
         return " ".join([_reverse_voc[t] for t in tokens]).replace(" <blank>", "")
     
-    def features_to_string(feature_tokens):
-        feature_tokens = tf.transpose(feature_tokens, perm=(1, 0))
-        res = ""
-        for feats in feature_tokens:
-            res += to_string(feats, _reverse_voc=reverse_feature_voc) + "\n"
-        return res
-    
     with open(save_path, mode='w') as pred_file:
         for feature, labels in data:
-            preds = model.beam_search(feature, beam_search_size=10)
-            #preds, _ = model.get_actions(feature, target=labels, training=True, phase=RepeatQTrainer.supervised_phase)
+            preds = model.beam_search(feature, beam_search_size=5)
             for pred, label, base_question, facts in zip(preds, labels, feature["base_question"], feature["facts"]):
                 translated = remove_adjacent_duplicate_grams(to_string(pred))
                 tf.print("Base question: ", to_string(base_question))
@@ -306,12 +297,10 @@ def preprocess(data_dirpath, save_dir, ds_name, voc_size, pretrained_embeddings_
 
     _save_ds("test", ds_test)
     # Split train into train/dev
-    ds_train_items = list(ds_train.items())
-    random.shuffle(ds_train_items)
-    ds_train = dict(ds_train_items)
-    d1 = int(0.9 * len(ds_train))
-    ds_train_train = ds_train[:d1]
-    ds_train_dev = ds_train[d1:]
+    random.shuffle(ds_train)
+    cut = int(0.9 * len(ds_train))
+    ds_train_train = ds_train[:cut]
+    ds_train_dev = ds_train[cut:]
 
     _save_ds("dev", ds_train_dev)
     _save_ds("train", ds_train_train)
@@ -354,7 +343,9 @@ if __name__ == '__main__':
                              "optimizer implementation")
     parser.add_argument("-dropout_rate", type=float, required=False, default=0.5, help="Dropout rate used on feed"
                                                                                        " forward layers' inputs")
-    parser.add_argument("-recurrent_dropout_rate", type=float, required=False, default=0.1,
+    parser.add_argument("-attention_dropout_rate", type=float, required=False, default=0.3, help="Dropout rate for"
+                                                                                                 "attention.")
+    parser.add_argument("-recurrent_dropout_rate", type=float, required=False, default=0.0,
                         help="Recurrent dropout rate used on RNN inputs")
     parser.add_argument("--no_pos_features", action="store_true", 
                         help="POS features won't be used as extra input to the model.")
@@ -388,6 +379,7 @@ if __name__ == '__main__':
             save_model=args.save_model,
             nb_episodes=args.nb_episodes,
             recurrent_dropout=args.recurrent_dropout_rate,
+            attention_dropout=args.attention_dropout_rate,
             dropout_rate=args.dropout_rate,
             use_pos=use_pos,
             use_ner=use_ner
