@@ -74,7 +74,7 @@ class NQG:
 if __name__ == '__main__':
     logging.root.setLevel(logging.NOTSET)
 
-    ds_types = ("squad", "squad_GA", "squad_+NER", "medquad", "squad_NA")
+    ds_types = ("squad", "squad_GA", "squad_+NER", "medquad", "squad_NA", "squad_repeat_q")
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-vocab_size', help='Size of the vocabulary to use for training', default=20000)
@@ -86,7 +86,7 @@ if __name__ == '__main__':
 
     ds_name = args.dataset_name
     data_home = f"{NQG_DATA_HOME}/"
-    if ds_name in ("squad", "medquad", "squad_+NER"):
+    if ds_name in ("squad", "medquad", "squad_+NER", "squad_repeat_q"):
         data_home += ds_name
         bio_dir = data_home
     else:

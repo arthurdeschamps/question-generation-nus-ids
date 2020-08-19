@@ -164,8 +164,26 @@ if __name__ == '__main__':
         if model == "repeat_q_squad":
             with open(f"{REPEAT_Q_SQUAD_DATA_DIR}/test.data.json", mode='r') as test_file:
                 test_data = json.load(test_file)
-            references = np.array([d["target"] for d in test_data if len(d["target"]) > 0  and d["passage_id"] != -1]).reshape((-1, 1))
+            references = {}
+            candidates = {}
+
+            for data in test_data:
+                q = data["base_question"]
+                # Only keeps organic data for evaluation
+                if data["passage_id"] == -1:
+                    rewrites = references.get(q)
+                    if rewrites is None:
+                        rewrites = [data["target"]]
+                    else:
+                        rewrites.append(data["target"])
+                    references[q] = rewrites
+
+            base_questions = [k for k, _ in references.items()]
+            references = [v for _, v in references.items()]
             candidates = np.array(pd.read_csv(
                 REPEAT_Q_SQUAD_OUTPUT_FILEPATH, header=None, sep='\n', comment=None)
             ).reshape((-1,))
+            # Keeps insertion order and gets rid of duplicates
+            candidates = list({c: None for c in candidates}.keys())
+
     benchmark(candidates, references)

@@ -18,9 +18,9 @@ SQUAD_FACTS_TRAIN = f"{SQUAD_DIR}/train_filtered"
 SQUAD_REWRITES_TRAIN = f"{SQUAD_DIR}/train_rewrites"
 SQUAD_FACTS_DEV = f"{SQUAD_DIR}/dev_filtered"
 SQUAD_REWRITES_DEV = f"{SQUAD_DIR}/dev_rewrites"
-SQUAD_REWRITES_AMAZON_TURK_1_JSON = f"{SQUAD_DIR}/squad_mechanical_turk_batch_1.json"
-SQUAD_REWRITES_AMAZON_TURK_2_JSON = f"{SQUAD_DIR}/squad_mechanical_turk_batch_2.json"
-
+SQUAD_REWRITES_TRAIN_AMAZON_TURK_1_JSON = f"{SQUAD_DIR}/train_turk_batch_1.json"
+SQUAD_REWRITES_TRAIN_AMAZON_TURK_2_JSON = f"{SQUAD_DIR}/train_turk_batch_2.json"
+SQUAD_REWRITES_TEST_AMAZON_TURK_JSON = f"{SQUAD_DIR}/test_turk_batch.json"
 
 MEDQUAD_DIR = f"{DATA_DIR}/medquad_dataset"
 MEDQUAD_RAW_DIR = f"{MEDQUAD_DIR}/MedQuAD_raw"

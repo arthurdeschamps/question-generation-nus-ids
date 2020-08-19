@@ -44,38 +44,51 @@ class RepeatQTrainer:
         env = self._build_environment()
         model_save_dir = RepeatQTrainer.prepare_model_save_dir()
 
-        # dev_score = self.dev_step(RepeatQTrainer.supervised_phase, env=env)
-        # tf.print("Initial dev score: ", dev_score)
+        nb_epochs_config = {
+            "synthetic": self.config.synth_supervised_epochs, "organic": self.config.org_supervised_epochs
+        }
+        for ds_type in self.training_data.keys():
+            nb_epochs = nb_epochs_config[ds_type]
+            tf.print("About to start training for ", nb_epochs, " epochs with ", ds_type, " dataset.")
+            for epoch in range(nb_epochs):
+                phase = self.phase(epoch)
 
-        for epoch in range(self.config.epochs):
-            phase = self.phase(epoch)
+                for features, label in tqdm(self.training_data[ds_type]):
+                    self.train_step(features, label, env, phase=phase, epoch=epoch, ds_type=ds_type)
 
-            tf.print(f"Starting Epoch {epoch + 1}.")
-            for features, label in tqdm(self.training_data):
-                self.train_step(features, label, env, phase=phase)
-
-            dev_score = self.dev_step(phase, env)
-            tf.print("Score on dev set: ", dev_score)
-            if self.config.saving_model:
-                checkpoint_filename = f"{model_save_dir}/{phase}_epoch_{epoch+1}_bleu_{'%.2f' % dev_score}"
-                self.model.save_weights(filepath=checkpoint_filename)
+                dev_score = self.dev_step(phase, env, ds_type)
+                tf.print("Score on dev set:", dev_score)
+                if self.config.saving_model:
+                    checkpoint_filename = f"{model_save_dir}/{phase}_{ds_type}_epoch_{epoch+1}_bleu_{'%.2f' % dev_score}"
+                    self.model.save_weights(filepath=checkpoint_filename)
 
     @tf.function
-    def train_step(self, features, labels, environment, phase):
+    def train_step(self, features, labels, environment, phase, epoch, ds_type):
         if phase == RepeatQTrainer.reinforce_phase:
             loss, tape = self._reinforce_step(features, labels, environment)
         else:
             loss, tape = self._supervised_step(features, labels)
-        tf.print("Loss: ", loss, "\n")
+        tf.print("Dataset:", ds_type, "/ Epoch:", epoch + 1, "/ Loss:", loss, "\n")
         gradients = tape.gradient(loss, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         return loss
 
-    def dev_step(self, phase, env):
+    def dev_step(self, phase, env, ds_type):
         tf.print("Performing dev step...")
-        predicted_questions = tf.TensorArray(size=self.config.dev_step_size, dtype=tf.int32, name="dev_predictions")
-        labels = tf.TensorArray(size=self.config.dev_step_size, dtype=tf.int32, name="dev_labels")
-        for i, (features, label) in tqdm(enumerate(self.dev_data.take(self.config.dev_step_size))):
+        dev_data = self.dev_data[ds_type]
+        if self.config.dev_step_size is not None and self.config.dev_step_size > 0:
+            dev_step_size = self.config.dev_step_size
+            dev_data = dev_data.take(dev_step_size)
+        else:
+            dev_step_size = 1
+
+        predicted_questions = tf.TensorArray(
+            size=dev_step_size, dtype=tf.int32, name="dev_predictions", dynamic_size=True
+        )
+        labels = tf.TensorArray(
+            size=dev_step_size, dtype=tf.int32, name="dev_labels", dynamic_size=True
+        )
+        for i, (features, label) in tqdm(enumerate(dev_data)):
             actions, _ = self.model.get_actions(features, target=label, training=False, phase=phase)
             paddings = (
                 (0, 0), (0, tf.math.maximum(0, self.config.max_generated_question_length - tf.shape(actions)[1]))
@@ -98,15 +111,15 @@ class RepeatQTrainer:
             refs = [[env.make_sequence(ref)] for ref in refs.numpy()]
             hyps = [env.make_sequence(hyp) for hyp in hyps.numpy()]
             for i in range(len(hyps)):
-                tf.print("Ref: ", env._tokens_to_sentence(refs[i][0]))
-                tf.print("Hyp: ", env._tokens_to_sentence(hyps[i]), "\n")
+                tf.print("Ref:", env._tokens_to_sentence(refs[i][0]))
+                tf.print("Hyp:", env._tokens_to_sentence(hyps[i]), "\n")
             return 100*nltk.translate.bleu_score.corpus_bleu(refs, hyps)
         bleu_score = tf.py_function(compute_bleu, inp=[labels, predicted_questions], Tout=tf.float32)
-        tf.print("BLEU-4: ", bleu_score)
+        tf.print("BLEU-4:", bleu_score)
         return bleu_score
 
     def phase(self, current_epoch):
-        if current_epoch < self.config.supervised_epochs:
+        if current_epoch < self.config.org_supervised_epochs + self.config.synth_supervised_epochs:
             return self.supervised_phase
         return self.reinforce_phase
 
@@ -189,7 +202,7 @@ class RepeatQTrainer:
         mean = tf.reduce_mean(rewards, axis=0)
         normalized_rewards = (rewards - mean) / std  # normalize discounted rewards
         policy_gradients = normalized_rewards * log_likelihood
-        tf.print("Avg Reward: ", mean)
+        tf.print("Avg Reward:", mean)
         policy_gradient_mean = tf.reduce_mean(policy_gradients)
         if tf.math.is_nan(policy_gradient_mean):
             return tf.float32.max
@@ -207,7 +220,7 @@ class RepeatQTrainer:
 
     def _debug_output(self, predictions, base_question, target, fact):
         def _debug_output(tokens, name):
-            tf.print(name, ": ", " ".join([self.reverse_voc[int(t)] for t in tokens if int(t) != 0]))
+            tf.print(name, ":", " ".join([self.reverse_voc[int(t)] for t in tokens if int(t) != 0]))
         _debug_output(predictions, "Predicted")
         _debug_output(target, "Rewritten")
         _debug_output(base_question, "Base question")

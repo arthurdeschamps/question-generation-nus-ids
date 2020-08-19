@@ -13,15 +13,16 @@ from tqdm import tqdm
 
 from data_processing.class_defs import RepeatQExample
 from data_processing.mpqg_dataset import MPQGDataset
-from data_processing.parse import read_medquad_raw_dataset, read_squad_dataset, read_squad_facts_files, \
+from data_processing.parse import read_medquad_raw_dataset, read_squad_facts_files, \
     read_squad_rewrites_files, read_squad_qmap_files, read_squad_rewrites_human_made, get_squad_question_to_answers_map
 from data_processing.utils import array_to_string
 from defs import NQG_MODEL_DIR, NQG_DATA_HOME, MEDQUAD_DIR, MEDQUAD_DEV, MEDQUAD_TRAIN, \
     MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_RAW_DATASET_FILEPATH, HOTPOT_QA_DEV_JSON, \
     HOTPOT_QA_DEV_TARGETS_PATH, \
     REPEAT_Q_RAW_DATASETS, SQUAD_FACTS_TRAIN, SQUAD_FACTS_DEV, SQUAD_REWRITES_DEV, SQUAD_REWRITES_TRAIN, \
-    ASS2S_PROCESSED_SQUAD_MPQG_DATA, SQUAD_REWRITES_AMAZON_TURK_1_JSON, REPEAT_Q_SQUAD_DATA_DIR, \
-    SQUAD_REWRITES_AMAZON_TURK_2_JSON, NQG_SQUAD_DATASET
+    ASS2S_PROCESSED_SQUAD_MPQG_DATA, REPEAT_Q_SQUAD_DATA_DIR, NQG_SQUAD_DATASET, \
+    SQUAD_REWRITES_TRAIN_AMAZON_TURK_1_JSON, SQUAD_REWRITES_TRAIN_AMAZON_TURK_2_JSON, \
+    SQUAD_REWRITES_TEST_AMAZON_TURK_JSON
 from data_processing.nqg_dataset import NQGDataset
 from data_processing.pre_processing import NQGDataPreprocessor
 import numpy as np
@@ -279,10 +280,9 @@ def generate_repeat_q_squad_raw():
     question_to_facts_map_dev = read_squad_qmap_files(qmap_dirpath=SQUAD_FACTS_DEV)
 
     # Organic data (amazon turk)
-    org_examples = read_squad_rewrites_human_made(dirpath=SQUAD_REWRITES_AMAZON_TURK_1_JSON)
-    org_examples.extend(read_squad_rewrites_human_made(dirpath=SQUAD_REWRITES_AMAZON_TURK_2_JSON))
-    org_examples_train = org_examples[:int(len(org_examples)*0.8)]
-    org_examples_test = org_examples[int(len(org_examples)*0.8):]
+    org_examples_train = read_squad_rewrites_human_made(dirpath=SQUAD_REWRITES_TRAIN_AMAZON_TURK_1_JSON)
+    org_examples_train.extend(read_squad_rewrites_human_made(dirpath=SQUAD_REWRITES_TRAIN_AMAZON_TURK_2_JSON))
+    org_examples_test = read_squad_rewrites_human_made(dirpath=SQUAD_REWRITES_TEST_AMAZON_TURK_JSON)
 
     question_to_answers_map = get_squad_question_to_answers_map()
 

@@ -21,8 +21,9 @@ class ModelConfiguration:
                  data_dir=REPEAT_Q_SQUAD_DATA_DIR,
                  restore_supervised_checkpoint=False,
                  supervised_model_checkpoint_path=None,
-                 supervised_epochs=6,
-                 dev_step_size=100,
+                 synth_supervised_epochs=2,
+                 org_supervised_epochs=18,
+                 dev_step_size=-1,
                  learning_rate=None,
                  saving_model=False,
                  training_beam_search_size=5,
@@ -48,7 +49,8 @@ class ModelConfiguration:
         self.batch_size = batch_size
         self.restore_supervised_checkpoint = restore_supervised_checkpoint
         self.supervised_model_checkpoint_path = supervised_model_checkpoint_path
-        self.supervised_epochs = supervised_epochs
+        self.synth_supervised_epochs = synth_supervised_epochs
+        self.org_supervised_epochs = org_supervised_epochs
         self.epochs = nb_epochs
         self.dev_step_size = dev_step_size
         self.learning_rate = learning_rate
@@ -107,12 +109,12 @@ class ModelConfiguration:
         self.saving_model = save_model
         return self
 
-    def with_supervised_epochs(self, nb_epochs):
-        self.supervised_epochs = nb_epochs
+    def with_org_supervised_epochs(self, nb_epochs):
+        self.org_supervised_epochs = nb_epochs
         return self
 
-    def with_epochs(self, nb_epochs):
-        self.epochs = nb_epochs
+    def with_synth_supervised_epochs(self, nb_epochs):
+        self.synth_supervised_epochs = nb_epochs
         return self
 
     def with_dev_step_size(self, dev_step_size):
