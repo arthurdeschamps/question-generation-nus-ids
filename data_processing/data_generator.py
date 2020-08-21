@@ -286,14 +286,13 @@ def generate_repeat_q_squad_raw():
 
     question_to_answers_map = get_squad_question_to_answers_map()
 
-    def _get_tokens(doc: Document):
-        return " ".join([w.text.lower() for w in doc.iter_words()])
+    def _get_tokens(words):
+        return " ".join([w.text.lower() for w in words])
 
-    def _get_pos_sequence(doc: Document):
-        return " ".join([w.xpos for w in doc.iter_words()])
+    def _get_pos_sequence(words):
+        return " ".join([w.xpos for w in words])
 
-    def _get_tags(doc, sought_after_tokens, beg_tag, inside_tag, tag_list=None):
-        words = list(doc.iter_words())
+    def _get_tags(words, sought_after_tokens, beg_tag, inside_tag, tag_list=None):
         if tag_list is None:
             tags = ["O" for _ in range(len(words))]
         else:
@@ -311,49 +310,49 @@ def generate_repeat_q_squad_raw():
                         tags[j] = inside_tag
         return tags
 
-    def _get_entity_tags(question_doc, answers, facts_docs):
+    def _get_entity_tags(question_doc, answers, facts_sentences):
         q_entities = [ent.text for ent in question_doc.entities]
         q_ent_tags = ["O" for _ in range(question_doc.num_words)]
-        facts_ent_tags = [["O" for _ in range(facts_docs[i].num_words)] for i in range(len(facts_docs))]
+        facts_ent_tags = [["O" for _ in range(len(facts_sentences[i].words))] for i in range(len(facts_sentences))]
         for q_entity in q_entities:
             q_entity_toks = q_entity.split()
             # Marks named entities in question
-            q_ent_tags = _get_tags(question_doc, q_entity_toks, beg_tag="BN", inside_tag="IN", tag_list=q_ent_tags)
+            q_ent_tags = _get_tags(list(question_doc.iter_words()), q_entity_toks, beg_tag="BN", inside_tag="IN",
+                                   tag_list=q_ent_tags)
             # Marks NEs from the question in facts
-            facts_ent_tags = [_get_tags(facts_docs[i], q_entity_toks, "BN", "IN", facts_ent_tags[i])
-                              for i in range(len(facts_docs))]
+            facts_ent_tags = [_get_tags(facts_sentences[i].words, q_entity_toks, "BN", "IN", facts_ent_tags[i])
+                              for i in range(len(facts_sentences))]
         # Overwrites tags with answer tags if any in facts
         for answer in answers:
             answer_tokens = answer.lower().split()
-            facts_ent_tags = [_get_tags(facts_docs[i], answer_tokens, "BA", "IA", facts_ent_tags[i])
-                              for i in range(len(facts_docs))]
+            facts_ent_tags = [_get_tags(facts_sentences[i].words, answer_tokens, "BA", "IA", facts_ent_tags[i])
+                              for i in range(len(facts_sentences))]
         return " ".join(q_ent_tags), [" ".join(f) for f in facts_ent_tags]
 
-    def _get_cases(doc):
-        return " ".join(["UP" if word.text[0].isupper() else "LOW" for word in doc.iter_words()])
+    def _get_cases(words):
+        return " ".join(["UP" if word.text[0].isupper() else "LOW" for word in words])
 
     def _make_example(_base_question, _rewritten_question, _facts, _answers, _passage_id):
         try:
             # Create example placeholders and filter out irrelevant question words for future word matching
             analyzed_question = nlp(_base_question)
             analyzed_target = nlp(_rewritten_question)
-            analyzed_facts = [nlp(fact) for fact in _facts]
+            analyzed_facts = [fact_sentence for fact in _facts for fact_sentence in nlp(fact).sentences]
             base_question_entity_tags, facts_entity_tags = _get_entity_tags(analyzed_question, _answers, analyzed_facts)
+            question_words = list(analyzed_question.iter_words())
             example = {
-                "base_question": _get_tokens(analyzed_question),
-                "base_question_pos_tags": _get_pos_sequence(analyzed_question),
+                "base_question": _get_tokens(question_words),
+                "base_question_pos_tags": _get_pos_sequence(question_words),
                 "base_question_entity_tags": base_question_entity_tags,
-                "base_question_letter_cases": _get_cases(analyzed_question),
-                "base_question_ner": NQGDataPreprocessor.create_ner_sequence(
-                    True, list([_ for _ in analyzed_question.iter_words()])
-                ),
-                "facts": [_get_tokens(fact) for fact in analyzed_facts],
+                "base_question_letter_cases": _get_cases(question_words),
+                "base_question_ner": NQGDataPreprocessor.create_ner_sequence(True, question_words),
+                "facts": [_get_tokens(fact.words) for fact in analyzed_facts],
                 "facts_entity_tags": facts_entity_tags,
-                "facts_pos_tags": [_get_pos_sequence(fact) for fact in analyzed_facts],
-                "facts_letter_cases": [_get_cases(doc) for doc in analyzed_facts],
-                "facts_ner": [NQGDataPreprocessor.create_ner_sequence(True, [_ for _ in fact.iter_words()])
+                "facts_pos_tags": [_get_pos_sequence(fact.words) for fact in analyzed_facts],
+                "facts_letter_cases": [_get_cases(sentence.words) for sentence in analyzed_facts],
+                "facts_ner": [NQGDataPreprocessor.create_ner_sequence(True, fact.words)
                               for fact in analyzed_facts],
-                "target": _get_tokens(analyzed_target),
+                "target": _get_tokens(analyzed_target.iter_words()),
                 "passage_id": _passage_id,
             }
             return example
@@ -393,6 +392,8 @@ def generate_repeat_q_squad_raw():
             if ex is not None:
                 ds.append(ex)
 
+        if not os.path.exists(REPEAT_Q_RAW_DATASETS):
+            os.mkdir(REPEAT_Q_RAW_DATASETS)
         with open(f"{REPEAT_Q_RAW_DATASETS}/squad_{ds_type}.json", mode='w') as f:
             json.dump(ds, f, indent=4)
 

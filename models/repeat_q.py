@@ -17,35 +17,44 @@ from defs import UNKNOWN_TOKEN, REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_RAW_DATASETS, 
 from models.RepeatQ.model import RepeatQ
 from models.RepeatQ.model_config import ModelConfiguration
 from models.RepeatQ.trainer import RepeatQTrainer
+
 sys.path.append(ASS2S_DIR + '/submodule/')
 from mytools import remove_adjacent_duplicate_grams
 
 
-def make_tf_dataset(base_questions, question_features, facts_list, facts_features, targets, targets_copy_indicator, 
-                    passage_ids, config, shuffle=True, drop_remainder=True, is_training=True):
+def make_tf_dataset(base_questions, question_features, facts_list, facts_features, targets, targets_copy_indicator,
+                    is_from_base_question_indicators, passage_ids, config, shuffle=True, drop_remainder=True,
+                    is_training=True):
     def _gen(is_synthetic):
         def _gen_ds():
-            for base_question, q_features, facts, f_features, target, target_copy_indicator, passage_id in \
-                    zip(base_questions, question_features, facts_list, facts_features, targets, targets_copy_indicator, passage_ids):
+            for i in range(len(base_questions)):
                 # Passage id is -1 for organic dataset. When training, we separate the 2 datasets and train on them
                 # in different epochs. For test and dev, we keep everything together
-                if is_training and ((passage_id == -1 and is_synthetic) or (passage_id != -1 and not is_synthetic)):
+                if is_training and ((passage_ids[i] == -1 and is_synthetic) or
+                                    (passage_ids[i] != -1 and not is_synthetic)):
                     continue
                 # For performance assessment, we only use organic data
-                if not is_training and passage_id != -1:
+                if not is_training and passage_ids[i] != -1:
                     continue
+                facts = facts_list[i]
+                f_features = facts_features[i]
+                base_question = base_questions[i]
+                q_features = question_features[i]
                 if use_pos or use_ner:
-                    f_features = [[feature[:tf.shape(facts)[1]] for feature in fact_features] for fact_features in f_features]
+                    f_features = [[feature[:tf.shape(facts)[1]] for feature in fact_features] for fact_features in
+                                  f_features]
                     f_features = tf.stack(
-                        [tf.stack([tf.pad(feature, paddings=[[0, tf.shape(facts)[1] - tf.shape(feature)[0]]]) 
+                        [tf.stack([tf.pad(feature, paddings=[[0, tf.shape(facts)[1] - tf.shape(feature)[0]]])
                                    for feature in fact_features]) for fact_features in f_features],
                         name="facts_features"
                     )
-                    f_features = tf.pad(f_features, paddings=([0, tf.shape(facts)[0] - tf.shape(f_features)[0]], [0, 0], [0, 0]))
+                    f_features = tf.pad(f_features,
+                                        paddings=([0, tf.shape(facts)[0] - tf.shape(f_features)[0]], [0, 0], [0, 0]))
                     # Make last dimension feature dimension (should be 2 for pos + entity)
                     f_features = tf.transpose(f_features, perm=[0, 2, 1])
                     q_features = tf.stack(
-                        [tf.pad(feature, [(0, tf.shape(base_question)[0] - tf.shape(feature)[0])]) for feature in q_features],
+                        [tf.pad(feature, [(0, tf.shape(base_question)[0] - tf.shape(feature)[0])]) for feature in
+                         q_features],
                         axis=0,
                         name="base_question_features"
                     )
@@ -54,35 +63,37 @@ def make_tf_dataset(base_questions, question_features, facts_list, facts_feature
                     # Creates 0-dimensional features (equivalent to not using them)
                     f_features = [[[] for _ in range(tf.shape(facts)[1])] for _ in range(tf.shape(facts)[0])]
                     q_features = [[] for _ in range(tf.shape(base_question)[0])]
-                # TODO remove the 3 facts limit (not enough computational power at the moment)
                 yield {
-                    "facts": facts[:3], 
-                    "facts_features": tf.cast(f_features[:3], dtype=tf.float32),
-                    "base_question": base_question,
-                    "base_question_features": tf.cast(q_features, dtype=tf.float32),
-                    "passage_id": passage_id,
-                    "target_copy_indicator": target_copy_indicator
-                }, target
+                          "facts": facts,
+                          "facts_features": tf.cast(f_features, dtype=tf.float32),
+                          "base_question": base_question,
+                          "base_question_features": tf.cast(q_features, dtype=tf.float32),
+                          "passage_id": passage_ids[i],
+                          "target_copy_indicator": targets_copy_indicator[i],
+                          "from_base_question": is_from_base_question_indicators[i],
+                      }, targets[i]
+
         return _gen_ds
-        
+
     output_types = (
         {
-            "facts": tf.int32, 
-            "facts_features": tf.float32, 
-            "base_question": tf.int32, 
+            "facts": tf.int32,
+            "facts_features": tf.float32,
+            "base_question": tf.int32,
             "base_question_features": tf.float32,
             "passage_id": tf.int32,
-            "target_copy_indicator": tf.int32
+            "target_copy_indicator": tf.int32,
+            "from_base_question": tf.bool
         }, tf.int32
     )
 
     ds_synth = tf.data.Dataset.from_generator(_gen(True), output_types=output_types)
     ds_org = tf.data.Dataset.from_generator(_gen(False), output_types=output_types)
     if shuffle:
-        ds_synth = ds_synth.shuffle(buffer_size=len([p_id for p_id in passage_ids if p_id != -1]), 
-                                    reshuffle_each_iteration=True)
-        ds_org = ds_org.shuffle(buffer_size=len([p_id for p_id in passage_ids if p_id == -1]),
-                                reshuffle_each_iteration=True)
+        synth_size = len([p_id for p_id in passage_ids if p_id != -1])
+        organic_size = len([p_id for p_id in passage_ids if p_id == -1])
+        ds_synth = ds_synth.shuffle(buffer_size=synth_size, reshuffle_each_iteration=True)
+        ds_org = ds_org.shuffle(buffer_size=organic_size, reshuffle_each_iteration=True)
     ds_synth = ds_synth.batch(batch_size=config.batch_size, drop_remainder=drop_remainder)
     ds_org = ds_org.batch(batch_size=config.batch_size, drop_remainder=drop_remainder)
     return {"synthetic": ds_synth, "organic": ds_org}
@@ -92,7 +103,8 @@ def get_data(data_dir, vocabulary, feature_vocabulary, data_limit, config: Model
     info("Preparing dataset...")
     datasets = {}
     for mode in ("train", "dev", "test"):
-        base_questions, question_features, facts, fact_features, targets, targets_copy_indicator, passage_ids = \
+        base_questions, question_features, facts, fact_features, targets, targets_copy_indicator, \
+            is_from_base_question_indicators, passage_ids = \
             RepeatQDataset(
                 f"{data_dir}/{mode}.data.json",
                 vocabulary=vocabulary,
@@ -108,6 +120,7 @@ def get_data(data_dir, vocabulary, feature_vocabulary, data_limit, config: Model
             facts_features=fact_features,
             targets=targets,
             targets_copy_indicator=targets_copy_indicator,
+            is_from_base_question_indicators=is_from_base_question_indicators,
             passage_ids=passage_ids,
             shuffle=mode != "test",
             drop_remainder=mode != "test",
@@ -127,18 +140,18 @@ def build_vocabulary(vocabulary_path):
 
 
 def train(data_dir, data_limit, batch_size, learning_rate, synth_supervised_epochs, org_supervised_epochs,
-          checkpoint_name, save_model, nb_episodes, recurrent_dropout, attention_dropout, dropout_rate, 
+          checkpoint_name, save_model, nb_episodes, recurrent_dropout, attention_dropout, dropout_rate,
           use_pos, use_ner):
-    config = ModelConfiguration.new()\
-        .with_batch_size(batch_size)\
-        .with_synth_supervised_epochs(synth_supervised_epochs)\
-        .with_org_supervised_epochs(org_supervised_epochs)\
-        .with_saving_model(save_model)\
-        .with_episodes(nb_episodes)\
-        .with_dropout_rate(dropout_rate)\
-        .with_attention_dropout(attention_dropout)\
-        .with_recurrent_dropout(recurrent_dropout)\
-        .with_pos_features(use_pos)\
+    config = ModelConfiguration.new() \
+        .with_batch_size(batch_size) \
+        .with_synth_supervised_epochs(synth_supervised_epochs) \
+        .with_org_supervised_epochs(org_supervised_epochs) \
+        .with_saving_model(save_model) \
+        .with_episodes(nb_episodes) \
+        .with_dropout_rate(dropout_rate) \
+        .with_attention_dropout(attention_dropout) \
+        .with_recurrent_dropout(recurrent_dropout) \
+        .with_pos_features(use_pos) \
         .with_ner_features(use_ner)
     tf.print(str(config))
     if learning_rate is not None:
@@ -157,30 +170,31 @@ def train(data_dir, data_limit, batch_size, learning_rate, synth_supervised_epoc
 
 def translate(model_dir, data_dir, use_pos, use_ner):
     config = ModelConfiguration.new().with_batch_size(32).with_pos_features(use_pos).with_ner_features(use_ner)
-    
+
     save_path = REPEAT_Q_SQUAD_OUTPUT_FILEPATH
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
-        
+
     def _reverse_voc(voc):
         return {v: k for k, v in voc.items()}
+
     vocabulary = build_vocabulary(config.vocabulary_path)
     reverse_voc = _reverse_voc(vocabulary)
     feature_voc = build_vocabulary(config.feature_vocabulary_path)
     data = get_data(
-        data_dir=data_dir, 
-        vocabulary=vocabulary, 
+        data_dir=data_dir,
+        vocabulary=vocabulary,
         feature_vocabulary=feature_voc,
-        data_limit=-1, 
+        data_limit=-1,
         config=config
     )["test"]
     model = RepeatQ(vocabulary, config)
     model.load_weights(model_dir)
-    
+
     def to_string(tokens, _reverse_voc=reverse_voc):
         tokens = tokens.numpy()
         return " ".join([_reverse_voc[t] for t in tokens]).replace(" <blank>", "")
-    
+
     with open(save_path, mode='w') as pred_file:
         for feature, labels in data["organic"]:
             preds = model.beam_search(feature, beam_search_size=5)
@@ -233,6 +247,7 @@ def generate_feature_vocabulary(ds, save_dir, null_tag="O"):
         else:
             for term in feature.split():
                 voc.add(term)
+
     for dp in ds:
         [_extend_voc(dp[k]) for k in feature_names]
     # Place the null tag at the first position so that it will have id 0
@@ -323,7 +338,7 @@ def preprocess(data_dirpath, save_dir, ds_name, voc_size, pretrained_embeddings_
 
 if __name__ == '__main__':
     logging.getLogger(__name__).setLevel(logging.NOTSET)
-    os.environ["CUDA_VISIBLE_DEVICES"] = "10"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "5"
     parser = argparse.ArgumentParser()
     parser.add_argument("action", default="train", type=str, choices=("translate", "preprocess", "train"))
     parser.add_argument("-data_dir", help="Used if action is train or translate. Directory path where all the data "
@@ -339,7 +354,7 @@ if __name__ == '__main__':
                         type=str)
     parser.add_argument("-data_limit", help="Number of examples to use for training. Default to -1, which means "
                                             "taking the whole dataset.", type=int, default=-1, required=False)
-    parser.add_argument("-preprocess_data_dir", 
+    parser.add_argument("-preprocess_data_dir",
                         help="Used if action is preprocess. Directory path containing 2 JSON files with the schema "
                              "presented in the README file. These files' names should contain the suffixes _test and "
                              "_train.",
@@ -353,7 +368,7 @@ if __name__ == '__main__':
                                                     "file will contain the n most frequent words", required=False,
                         default=30000)
     parser.add_argument("-batch_size", type=int, default=64)
-    parser.add_argument("-learning_rate", type=float, required=False, 
+    parser.add_argument("-learning_rate", type=float, required=False,
                         help="Learning rate for the optimizer. Default is whatever default value is used by TF's Adam "
                              "optimizer implementation")
     parser.add_argument("-dropout_rate", type=float, required=False, default=0.5, help="Dropout rate used on feed"
@@ -362,14 +377,14 @@ if __name__ == '__main__':
                                                                                                  "attention.")
     parser.add_argument("-recurrent_dropout_rate", type=float, required=False, default=0.0,
                         help="Recurrent dropout rate used on RNN inputs")
-    parser.add_argument("--no_pos_features", action="store_true", 
+    parser.add_argument("--no_pos_features", action="store_true",
                         help="POS features won't be used as extra input to the model.")
-    parser.add_argument("--no_ner_indicators", action="store_true", 
+    parser.add_argument("--no_ner_indicators", action="store_true",
                         help="Named entity indicators won't be used as extra input to the model.")
     parser.add_argument("-synth_supervised_epochs", type=int, default=2,
                         help="Number of epochs to train the model in supervised mode for on the synthetically generated"
                              "dataset.")
-    parser.add_argument("-org_supervised_epochs", type=int, default=18, 
+    parser.add_argument("-org_supervised_epochs", type=int, default=18,
                         help="Number of epochs to train the model in supervised mode for on the Amazon Turk collected"
                              "dataset.")
     parser.add_argument("-nb_epochs", type=int, default=20, help="Total number of epochs to train for.", required=False)
@@ -381,14 +396,14 @@ if __name__ == '__main__':
                              " training will resume from the checkpoint and continue with the provided parameters.")
     parser.add_argument("--save_model", action="store_true", help="Add this flag to save checkpoints while training.")
     args = parser.parse_args()
-    
+
     use_pos = not args.no_pos_features
     use_ner = not args.no_ner_indicators
     if args.action == "train":
         assert args.data_dir is not None
         train(
-            data_dir=args.data_dir, 
-            data_limit=args.data_limit, 
+            data_dir=args.data_dir,
+            data_limit=args.data_limit,
             batch_size=args.batch_size,
             learning_rate=args.learning_rate,
             org_supervised_epochs=args.org_supervised_epochs,
@@ -405,7 +420,8 @@ if __name__ == '__main__':
         info("Training completed.")
     elif args.action == "preprocess":
         assert all(arg is not None for arg in (args.save_dir, args.ds_name))
-        preprocess(args.preprocess_data_dir, args.save_dir, args.ds_name, args.voc_size, args.pretrained_embeddings_path)
+        preprocess(args.preprocess_data_dir, args.save_dir, args.ds_name, args.voc_size,
+                   args.pretrained_embeddings_path)
         info("Preprocessing completed successfully.")
     elif args.action == "translate":
         assert args.model_checkpoint_name is not None and args.data_dir is not None

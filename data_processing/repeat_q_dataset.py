@@ -57,8 +57,10 @@ class RepeatQDataset:
         facts_list = []
         facts_features = []
         targets = []
-        # Indicator of if a target word comes from the base question and where in the base question
+        # Indicator of if a target word comes from the base question or one of the facts and at which location
         targets_question_copy_indicator = []
+        # If a target word is present in the base question
+        is_from_base_question = []
         passage_ids = []
         max_fact_length = 0
         max_nb_facts = 0
@@ -66,26 +68,39 @@ class RepeatQDataset:
             if example.rephrased_question == "":
                 continue
             passage_ids.append(example.passage_id)
-            targets.append(self.words_to_ids(example.rephrased_question.split()))
-            base_questions.append(self.words_to_ids(example.base_question.split()))
-            # Index in the base question if the word comes from the base question, -1 otherwise
-            targets_question_copy_indicator.append([base_questions[-1].index(word) if word in base_questions[-1]
-                                                    else -1 for word in targets[-1]])
+            target = self.words_to_ids(example.rephrased_question.split())
+            targets.append(target)
+            base_question = self.words_to_ids(example.base_question.split())
+            base_questions.append(base_question)
             base_questions_features.append(self.features_to_ids(example.base_question_features))
-            facts = [self.words_to_ids(fact.split(' ')) for fact in example.facts]
-            facts_features.append([self.features_to_ids(fact) for fact in example.facts_features])
+            facts = [self.words_to_ids(fact.split(' ')) for fact in example.facts][:3]
+            facts_features.append([self.features_to_ids(fact) for fact in example.facts_features[:3]])
             max_fact_length = max(max_fact_length, max(len(fact) for fact in facts))
             max_nb_facts = max(max_nb_facts, len(facts))
             facts_list.append(facts)
+            is_from_base_question.append([True if w in base_question else False for w in target])
 
         if not self.pad_sequences:
             return base_questions, facts_list, targets
         base_questions = self.sequence_padding(base_questions)
         targets = self.sequence_padding(targets)
-        targets_question_copy_indicator = self.sequence_padding(targets_question_copy_indicator)
-        facts_list = np.array(self.matrix_padding(facts_list, max_length=128, max_width=max_nb_facts))
+        is_from_base_question = self.sequence_padding(is_from_base_question)
+        facts_list = np.array(self.matrix_padding(facts_list, max_length=max_fact_length, max_width=max_nb_facts))
+
+        for base_question, facts, target in zip(base_questions, facts_list, targets):
+            # Index in the base question if the word comes from the base question, -1 otherwise
+            copy_indicators = [np.where(base_question == w)[0][0] if w != 0 and w in base_question else -1 for w in target]
+            # Same for facts but offset by the base question's length. Each fact is also offset by the fact that comes
+            # before itself. The final logits order is: [vocabulary, base question, fact 1, fact 2, ..., fact l]
+            offset = len(base_question)
+            for fact in facts:
+                for i in range(len(copy_indicators)):
+                    if target[i] != 0 and target[i] in fact:
+                        copy_indicators[i] = np.where(fact == target[i])[0][0] + offset
+                offset += len(fact)
+            targets_question_copy_indicator.append(copy_indicators)
         return base_questions, base_questions_features, facts_list, facts_features, targets, \
-               targets_question_copy_indicator, passage_ids
+               targets_question_copy_indicator, is_from_base_question, passage_ids
 
     def words_to_ids(self, sentence: List[str]):
         return [self.vocab.get(word.lower(), self.vocab[self.unk_token]) for word in sentence]
@@ -107,7 +122,8 @@ class RepeatQDataset:
         """
         if max_length is None:
             max_length = max([len(seq) for seq in sequences])
-        padded_sequences = list(seq[:max_length] + [self.pad_id for _ in range(max_length - len(seq))] for seq in sequences)
+        padded_sequences = list(
+            seq[:max_length] + [self.pad_id for _ in range(max_length - len(seq))] for seq in sequences)
         return np.array(padded_sequences)
 
     def matrix_padding(self, matrices: List[List[List[int]]], max_length, max_width):
@@ -129,9 +145,8 @@ class RepeatQDataset:
         # Second dimension
         pad_seq = [self.pad_id for _ in range(max_length)]
         matrices = np.array([matrix if len(matrix) == max_width else np.append(
-                matrix,
-                [pad_seq for _ in range(max_width - len(matrix))],
-                axis=0
+            matrix,
+            [pad_seq for _ in range(max_width - len(matrix))],
+            axis=0
         ) for matrix in matrices])
         return matrices
-

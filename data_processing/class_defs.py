@@ -121,7 +121,7 @@ class RepeatQExample(JsonParsable):
             facts_features=[RepeatQFeature(
                 pos_tags=pos, entity_tags=entity, ner=ner, letter_cases=cases
             ) for pos, entity, ner, cases in zip(example["facts_pos_tags"], example["facts_entity_tags"],
-                                                 example["facts_ner"], example["facts_letter_cases"])],
+                                                 example["facts_ner"], example["facts_letter_cases"])][:3],
             rephrased_question=example["target"],
             passage_id=example["passage_id"]
         ) for example in json]

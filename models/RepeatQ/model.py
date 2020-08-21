@@ -13,7 +13,6 @@ from models.RepeatQ.model_config import ModelConfiguration
 
 
 class RepeatQ(LoggingMixin, tf.keras.models.Model):
-
     NetworkState = namedtuple("NetworkState", (
         "base_question",
         "base_question_encodings",
@@ -42,10 +41,14 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         self.decoder = self._build_decoder()
 
         # Dense layers for copy probability
-        self.W_q_copy = tf.keras.layers.Dense(units=1, name="W_question_copy")
-        self.W_q_copy_dropout = tf.keras.layers.Dropout(self.config.dropout_rate, name="W_question_copy_dropout")
-        self.U_q_copy = tf.keras.layers.Dense(units=1, name="V_question_copy")
-        self.U_q_copy_dropout = tf.keras.layers.Dropout(self.config.dropout_rate, name="V_question_copy_dropout")
+        self.W_copy = tf.keras.layers.Dense(units=64, name="W_copy", activation="relu")
+        self.W_copy_dropout = tf.keras.layers.Dropout(self.config.dropout_rate, name="W_copy_dropout")
+        self.U_copy = tf.keras.layers.Dense(units=64, name="V_copy", activation="relu")
+        self.U_copy_dropout = tf.keras.layers.Dropout(self.config.dropout_rate, name="U_copy_dropout")
+        self.Z_copy = tf.keras.layers.Dense(units=64, name="Z_copy", activation="relu")
+        self.Z_copy_dropout = tf.keras.layers.Dropout(self.config.dropout_rate, name="V_copy_dropout")
+        self.origin_probs_layer = tf.keras.layers.Dense(units=3, name="origin_probs_layer", activation="softmax")
+        self.origin_probs_layer_dropout = tf.keras.layers.Dropout(self.config.dropout_rate, name="origin_probs_dropout")
 
         # Base question encoder
         self.base_question_encoder = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
@@ -67,7 +70,10 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
 
     def call(self, inputs, constants=None, training=None, mask=None):
 
-        voc_logits, (hidden_state, carry_state), (question_att_vector, question_copy_logits) = self.decoder(
+        voc_logits, \
+        (hidden_state, carry_state), \
+        (question_att_vector, question_copy_logits), \
+        (facts_att_vector, facts_copy_logits) = self.decoder(
             inputs={
                 "base_question_encodings": inputs.base_question_encodings,
                 "facts_encodings": inputs.facts_encodings,
@@ -81,9 +87,19 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             training=training
         )
 
+        origin_probs = self.origin_probs_layer(self.origin_probs_layer_dropout(
+            self.W_copy(self.W_copy_dropout(hidden_state)) +
+            self.U_copy(self.U_copy_dropout(question_att_vector)) +
+            self.Z_copy(self.Z_copy_dropout(facts_att_vector))
+        ))
+
         # Probability of copying a word from the base question
-        q_copy_prob = tf.math.sigmoid(self.W_q_copy(self.W_q_copy_dropout(hidden_state)) +
-                                      self.U_q_copy(self.U_q_copy_dropout(question_att_vector)))
+        # q_copy_prob = tf.math.sigmoid(self.W_q_copy(self.W_q_copy_dropout(hidden_state)) +
+        #                               self.U_q_copy(self.U_q_copy_dropout(question_att_vector)))
+
+        # Same but with facts
+        # f_copy_prob = tf.math.sigmoid(self.W_f_copy(self.W_f_copy_dropout(hidden_state)) +
+        #                               self.U_f_copy(self.U_f_copy_dropout(facts_att_vector)))
 
         # Only decodes further for non-finished beams (last token wasn't a padding token or a question mark)
         mask = tf.expand_dims(tf.logical_or(
@@ -97,9 +113,10 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         hidden_state = tf.where(mask, hidden_state, inputs.decoder_states[0])
         carry_state = tf.where(mask, carry_state, inputs.decoder_states[1])
 
-        return voc_logits, question_copy_logits, q_copy_prob, (hidden_state, carry_state)
+        return voc_logits, question_copy_logits, facts_copy_logits, origin_probs, (hidden_state, carry_state)
 
-    def get_initial_state(self, base_question, base_question_features, facts, facts_features, batch_size, training=None):
+    def get_initial_state(self, base_question, base_question_features, facts, facts_features, batch_size,
+                          training=None):
         base_question_embeddings = self.embedding_layer({"sentence": base_question, "features": base_question_features})
         base_question_encodings = self.base_question_encoder(base_question_embeddings)
         facts_embeddings = self.embedding_layer({"sentence": facts, "features": facts_features})
@@ -155,16 +172,18 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
                 return tf.reduce_any(tf.logical_not(beams_finished))
 
         while _continue_loop(ite, finished):
-            voc_logits, question_word_logits, q_copy_prob, decoder_states = self(
+            voc_logits, question_word_logits, facts_word_logits, origin_probs, decoder_states = self(
                 network_state, training=training
             )
 
-            predicted_tokens = RepeatQ.get_output_tokens(
+            predicted_tokens = tf.squeeze(RepeatQ.get_output_tokens(
                 voc_logits=voc_logits,
                 base_question_logits=question_word_logits,
-                question_copy_prob=tf.squeeze(q_copy_prob, axis=-1),
+                facts_logits=facts_word_logits,
+                facts=facts,
+                origin_probs=origin_probs,
                 base_question=base_question
-            )
+            ), axis=-1)
 
             if training:
                 predicted_tokens = \
@@ -176,18 +195,12 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
                 predicted_tokens.set_shape(shape=(batch_size,))
 
             actions = actions.write(ite, predicted_tokens)
-            # Final logits are the concatenation of (1 - copy prob) * vocabulary distribution and
-            # copy prob * question attention
-            def stable_softmax(x):
-                z = x - tf.reduce_max(x, axis=-1, keepdims=True)
-                numerator = tf.exp(z)
-                denominator = tf.reduce_sum(numerator, axis=-1, keepdims=True)
-                softmax = numerator / denominator
-                return softmax
+
             pointer_softmax = tf.concat((
-                (1.0 - q_copy_prob) * stable_softmax(voc_logits),
-                 q_copy_prob * stable_softmax(question_word_logits)
-            ), axis=-1, name="pointer_logits")
+                origin_probs[..., 0:1] * RepeatQ.stable_softmax(voc_logits),
+                origin_probs[..., 1:2] * RepeatQ.stable_softmax(question_word_logits),
+                origin_probs[..., 2:3] * RepeatQ.stable_softmax(facts_word_logits)
+            ), axis=-1, name="pointer_softmax")
             all_logits = all_logits.write(ite, pointer_softmax)
 
             if phase == RepeatQTrainer.supervised_phase and training:
@@ -210,7 +223,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             finished = tf.logical_or(finished, tf.repeat(tf.equal(size, ite), repeats=(tf.shape(target)[0],)))
             if phase == RepeatQTrainer.supervised_phase and training:
                 # Goes all the way to the target length
-                finished = tf.logical_or(finished, tf.equal(target[:, tf.minimum(size-1, ite)], 0))
+                finished = tf.logical_or(finished, tf.equal(target[:, tf.minimum(size - 1, ite)], 0))
             else:
                 finished = tf.logical_or(
                     finished,
@@ -261,7 +274,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         observations = batchify(initial_network_state.observation, name="observations")
         beams = tf.zeros(shape=(batch_size, beam_search_size, beam_length), dtype=tf.int32, name="beams")
         beam_log_probs = tf.expand_dims(tf.repeat(
-            tf.expand_dims(tf.concat((tf.zeros(shape=(beam_search_size-1,)), [-1.0]), axis=0), axis=0),
+            tf.expand_dims(tf.concat((tf.zeros(shape=(beam_search_size - 1,)), [-1.0]), axis=0), axis=0),
             repeats=batch_size,
             axis=0,
             name="beam_probs"
@@ -278,7 +291,8 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
 
         def beams_not_finished(_beam_batches, _last_ind):
             res = tf.map_fn(
-                lambda _beams: tf.map_fn(functools.partial(beam_not_finished, _last_ind=_last_ind), _beams, dtype=tf.bool),
+                lambda _beams: tf.map_fn(functools.partial(beam_not_finished, _last_ind=_last_ind), _beams,
+                                         dtype=tf.bool),
                 _beam_batches,
                 dtype=tf.bool
             )
@@ -295,21 +309,30 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
                 is_first_step=first_step
             )
             # Logits: [batch size * beam size, vocabulary size]
-            voc_logits, q_copy_logits, q_copy_prob, decoder_states = self(beam_network_state, training=False)
+            voc_logits, q_copy_logits, f_copy_logits, origin_probs, decoder_states = self(
+                beam_network_state, training=False
+            )
             # [batch size, beam size, vocabulary size]
             voc_logits = recover_dims(voc_logits)
             q_copy_logits = recover_dims(q_copy_logits)
-            q_copy_prob = recover_dims(q_copy_prob)
+            f_copy_logits = recover_dims(f_copy_logits)
+            origin_probs = recover_dims(origin_probs)
             # top_probs: [batch size, beam size, beam size]
             top_probs, top_words = RepeatQ.get_output_tokens(
-                voc_logits, q_copy_logits, q_copy_prob, recover_dims(base_question), top_k=beam_search_size
+                voc_logits=voc_logits,
+                base_question_logits=q_copy_logits,
+                facts=recover_dims(facts),
+                facts_logits=f_copy_logits,
+                origin_probs=origin_probs,
+                base_question=recover_dims(base_question),
+                top_k=beam_search_size
             )
             decoder_states = tuple(recover_dims(s) for s in decoder_states)
             # [batch size, beam size, 1] -> [batch size, beam size, beam_size]
             beam_log_probs = tf.repeat(beam_log_probs, repeats=beam_search_size, axis=-1)
             top_probs = tf.math.add(tf.math.log(top_probs), beam_log_probs)
             # Masks finished beams probs
-            beam_mask = beams_not_finished(beams, it-1)
+            beam_mask = beams_not_finished(beams, it - 1)
             top_probs = tf.where(beam_mask, top_probs, tf.zeros_like(top_probs, dtype=tf.float32))
             top_words = tf.where(beam_mask, top_words, tf.zeros_like(top_words, dtype=tf.int32))
             # [batch size, beam size * beam size]
@@ -324,7 +347,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             beams = tf.gather(beams, indices=top_beam_indices, axis=1, batch_dims=1)
             top_words = tf.gather(top_words, indices=top_beam_indices, axis=1, batch_dims=1)
             beams = tf.concat((
-                beams[:, :, :it], tf.expand_dims(top_words, axis=-1), beams[:, :, it+1:]
+                beams[:, :, :it], tf.expand_dims(top_words, axis=-1), beams[:, :, it + 1:]
             ), axis=-1)
             beams.set_shape((batch_size, beam_search_size, beam_length))
 
@@ -336,7 +359,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             # Needs to both have a higher likelihood and be a finished beam
             # We also divide by the beam length for normalization sake
             better_beam = tf.logical_and(
-                tf.greater_equal(best_beam_prob_per_batch/tf.cast(it, tf.float32), best_beam_prob),
+                tf.greater_equal(best_beam_prob_per_batch / tf.cast(it, tf.float32), best_beam_prob),
                 beam_finished
             )
             best_beam = tf.where(
@@ -344,7 +367,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
                 tf.squeeze(best_beam_per_batch, axis=1),
                 best_beam
             )
-            best_beam_prob = tf.where(better_beam, best_beam_prob_per_batch/tf.cast(it, tf.float32), best_beam_prob)
+            best_beam_prob = tf.where(better_beam, best_beam_prob_per_batch / tf.cast(it, tf.float32), best_beam_prob)
 
             decoder_states = tuple(tf.gather(s, top_beam_indices, axis=1, batch_dims=1) for s in decoder_states)
             decoder_states = tuple(collapse_dims(s) for s in decoder_states)
@@ -357,7 +380,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         beam_indices = tf.argmax(beam_log_probs, axis=1)
         beam_log_probs = tf.reduce_max(beam_log_probs, axis=1)
         beams = tf.gather(beams, beam_indices, axis=1, batch_dims=1)
-        cond = tf.expand_dims(tf.greater(best_beam_prob, beam_log_probs/tf.cast(beam_length, tf.float32)), axis=-1)
+        cond = tf.expand_dims(tf.greater(best_beam_prob, beam_log_probs / tf.cast(beam_length, tf.float32)), axis=-1)
         best_beams = tf.where(cond, best_beam, beams)
         best_beam_probs = tf.where(tf.squeeze(cond, axis=1), best_beam_prob, beam_log_probs)
         if return_probs:
@@ -365,32 +388,49 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         return best_beams
 
     @staticmethod
-    def get_output_tokens(voc_logits, base_question_logits, question_copy_prob, base_question, top_k=1):
-        base_question_distribution = tf.math.softmax(base_question_logits, axis=-1)
-        voc_words_distribution = tf.math.softmax(voc_logits, axis=-1)
+    def get_output_tokens(voc_logits, base_question_logits, facts_logits, origin_probs, base_question, facts, top_k=1):
+        flattened_facts = tf.concat(tf.unstack(facts, axis=-2), axis=-1)
+
+        voc_generated_prob = origin_probs[..., 0:1]
+        question_copy_prob = origin_probs[..., 1:2]
+        facts_copy_prob = origin_probs[..., 2:3]
+
+        def zero_out(x):
+            return tf.where(tf.equal(x, 0), tf.zeros_like(x), x)
         # Prevents copying padding tokens by zero-ing out the logits where 0 tokens are found
-        base_question_distribution = tf.where(
-            tf.equal(base_question, 0), tf.zeros_like(base_question_distribution), base_question_distribution
-        )
-        if top_k == 1:
-            question_indices_to_copy = tf.argmax(base_question_distribution, axis=-1)
-            question_words_probs = tf.reduce_max(base_question_distribution, axis=-1)
-            voc_words = tf.argmax(voc_words_distribution, axis=-1, output_type=tf.int32)
-            voc_words_probs = tf.reduce_max(voc_words_distribution, axis=-1)
-        else:
-            question_words_probs, question_indices_to_copy = tf.math.top_k(base_question_distribution, k=top_k)
-            voc_words_probs, voc_words = tf.math.top_k(voc_words_distribution, k=top_k)
+        base_question_logits = zero_out(base_question_logits)
+        # Same for facts logits
+        facts_logits = zero_out(facts_logits)
+        base_question_distribution = RepeatQ.stable_softmax(base_question_logits)
+        facts_distribution = RepeatQ.stable_softmax(facts_logits)
+        copy_distribution = tf.concat((
+            question_copy_prob * base_question_distribution,
+            facts_copy_prob * facts_distribution
+        ), axis=-1, name="copy_distribution")
+
+        voc_words_distribution = RepeatQ.stable_softmax(voc_logits)
+
+        copied_words_probs, indices_to_copy = tf.math.top_k(copy_distribution, k=top_k)
+        voc_words_probs, voc_words = tf.math.top_k(voc_words_distribution, k=top_k)
 
         q_batch_dims = len(base_question.get_shape()) - 1
-        question_words_to_copy = tf.gather(base_question, question_indices_to_copy, batch_dims=q_batch_dims)
-        question_words_probs = question_copy_prob * question_words_probs
-        voc_words_probs = (1.0 - question_copy_prob) * voc_words_probs
-        cond = question_words_probs > voc_words_probs
-        predicted_tokens = tf.where(cond, question_words_to_copy, voc_words, name="pred_tokens")
+        copy_words = tf.concat((base_question, flattened_facts), axis=-1, name="copy_words")
+        words_to_copy = tf.gather(copy_words, indices_to_copy, batch_dims=q_batch_dims)
+        voc_words_probs = voc_generated_prob * voc_words_probs
+        cond = copied_words_probs > voc_words_probs
+        predicted_tokens = tf.where(cond, words_to_copy, voc_words, name="pred_tokens")
         if top_k == 1:
             return predicted_tokens
-        token_probs = tf.where(cond, question_words_probs, voc_words_probs)
+        token_probs = tf.where(cond, copied_words_probs, voc_words_probs)
         return token_probs, predicted_tokens
+
+    @staticmethod
+    def stable_softmax(x, axis=-1):
+        z = x - tf.reduce_max(x, axis=axis, keepdims=True)
+        numerator = tf.exp(z)
+        denominator = tf.reduce_sum(numerator, axis=-1, keepdims=True)
+        softmax = numerator / denominator
+        return softmax
 
     def _build_decoder(self):
         question_attention = self._build_attention_layer("base_question_attention")

@@ -132,27 +132,28 @@ class RepeatQTrainer:
                 actions[0],
                 features["base_question"][0],
                 target[0],
-                features["facts"][0][0]
+                features["facts"][0]
             ), Tout=tf.int32)
-            mask = tf.cast(tf.not_equal(target, 0), dtype=tf.float32, name="seq_loss_mask")
+            # Sets loss weights to 0 for padding tokens
+            is_not_padding = tf.not_equal(target, 0)
+            weights = tf.cast(is_not_padding, dtype=tf.float32, name="seq_loss_mask")
+            # Sets loss weights to 0.25 for base question tokens (to hopefully encourage diversification)
+            # weights = tf.where(
+            #     tf.logical_and(features["from_base_question"], is_not_padding),
+            #     0.25 * tf.ones_like(weights),
+            #     weights
+            # )
             # We need to slightly modify the targets so that the words that come from the base question are offset
             # by voc_size, as the logits are the concatenation of the vocabulary logits with the logits for the
             # base question (if words are being copied from there)
-            modified_targets = tf.where(
-                tf.not_equal(features["target_copy_indicator"], -1),
-                len(self.vocabulary) + features["target_copy_indicator"],
-                target
-            )
+            copied = tf.not_equal(features["target_copy_indicator"], -1, name="copied_tokens")
+            modified_targets = tf.where(copied, len(self.vocabulary) + features["target_copy_indicator"], target)
             num_classes = pointer_softmax.get_shape()[-1]
             flattened_targets = tf.reshape(modified_targets, (-1,))
             flattened_probs = tf.reshape(pointer_softmax, (-1, num_classes))
-            flattened_mask = tf.reshape(mask, (-1,))
+            flattened_weights = tf.reshape(weights, (-1,))
             losses = loss_fc(flattened_targets, flattened_probs)
-            loss = tf.reduce_sum(flattened_mask * losses, axis=-1) / tf.reduce_sum(flattened_mask)
-            # loss = tfa.seq2seq.sequence_loss(
-            #     logits=pointer_softmax, targets=target, weights=mask, sum_over_batch=True, sum_over_timesteps=True,
-            #     average_across_timesteps=False, average_across_batch=False
-            # )
+            loss = tf.reduce_sum(flattened_weights * losses, axis=-1) / tf.reduce_sum(flattened_weights)
 
         return loss, tape
 
@@ -218,13 +219,14 @@ class RepeatQTrainer:
         )
         return environment
 
-    def _debug_output(self, predictions, base_question, target, fact):
+    def _debug_output(self, predictions, base_question, target, facts):
         def _debug_output(tokens, name):
             tf.print(name, ":", " ".join([self.reverse_voc[int(t)] for t in tokens if int(t) != 0]))
         _debug_output(predictions, "Predicted")
         _debug_output(target, "Rewritten")
         _debug_output(base_question, "Base question")
-        _debug_output(fact, "Fact")
+        for i, fact in enumerate(facts):
+            _debug_output(fact, f"Fact {i}")
         return 0
 
     @staticmethod

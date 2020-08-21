@@ -47,11 +47,11 @@ class Decoder(tf.keras.layers.Layer):
         self.sequence_length = None
 
         # Output sub-layer weights
-        self.W_r = tf.keras.layers.Dense(units=self.readout_size, name="decoder_W_r")
+        self.W_r = tf.keras.layers.Dense(units=self.readout_size, name="decoder_W_r", activation="relu")
         self.W_r_dropout = tf.keras.layers.Dropout(rate=dropout_rate, name="W_r_input_dropout")
-        self.U_r = tf.keras.layers.Dense(units=self.readout_size, name="decoder_U_r")
+        self.U_r = tf.keras.layers.Dense(units=self.readout_size, name="decoder_U_r", activation="relu")
         self.U_r_dropout = tf.keras.layers.Dropout(rate=dropout_rate, name="U_r_input_dropout")
-        self.V_r = tf.keras.layers.Dense(units=self.readout_size, name="decoder_V_r")
+        self.V_r = tf.keras.layers.Dense(units=self.readout_size, name="decoder_V_r", activation="relu")
         self.V_r_dropout = tf.keras.layers.Dropout(rate=dropout_rate, name="V_r_input_dropout")
 
         self.maxout = tfa.layers.Maxout(int(self.readout_size / 2))
@@ -87,13 +87,13 @@ class Decoder(tf.keras.layers.Layer):
             base_question_encodings, hidden_state, mask=base_question_mask, training=training
         )
         # Compute fact attention vectors
-        fact_attention_vector = self._compute_facts_attention_vectors(
+        facts_attention_vector, facts_attention_logits = self._compute_facts_attention_vectors(
             facts_encodings, hidden_state, mask=facts_mask, training=training
         )
 
         # Create the decoder's next input
         decoder_input = tf.concat(
-            (previous_token_embedding, fact_attention_vector, base_question_attention_vector),
+            (previous_token_embedding, facts_attention_vector, base_question_attention_vector),
             axis=1
         )
         output, (hidden_state, carry_state) = self.lstm_cell(
@@ -102,7 +102,8 @@ class Decoder(tf.keras.layers.Layer):
 
         # Compute logits
         logits = self._output_layer(hidden_state, decoder_input, base_question_attention_vector, training=training)
-        return logits, (hidden_state, carry_state), (base_question_attention_vector, base_question_attention_logits)
+        return logits, (hidden_state, carry_state), (base_question_attention_vector, base_question_attention_logits), \
+               (facts_attention_vector, facts_attention_logits)
 
     def _output_layer(self, hidden_state, previous_input, base_question_attention_vector, training=None):
         r_t = self.W_r(self.W_r_dropout(hidden_state)) + \
@@ -173,5 +174,5 @@ class Decoder(tf.keras.layers.Layer):
         facts_attention_vectors = tf.reduce_sum(
             max_attention_weights * selected_facts_encodings, axis=1, name="facts_attention_vectors"
         )
-        return facts_attention_vectors
+        return facts_attention_vectors, facts_attention_weights
 
