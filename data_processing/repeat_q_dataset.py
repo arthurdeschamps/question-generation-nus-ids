@@ -80,6 +80,7 @@ class RepeatQDataset:
             facts_list.append(facts)
             is_from_base_question.append([True if w in base_question else False for w in target])
 
+
         if not self.pad_sequences:
             return base_questions, facts_list, targets
         base_questions = self.sequence_padding(base_questions)

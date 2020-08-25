@@ -51,7 +51,7 @@ class NQG:
             dev_feats=[f"{DATAHOME}/dev/data.txt.pos", f"{DATAHOME}/dev/data.txt.ner", f"{DATAHOME}/dev/data.txt.case"],
             dev_ref=f"{DATAHOME}/dev/data.txt.target.txt",
             max_sent_length=100,
-            gpus=[1],
+            gpus=[],
             lower_input=False,
             process_shuffle=False,
             input_feed=1,
@@ -74,7 +74,7 @@ class NQG:
 if __name__ == '__main__':
     logging.root.setLevel(logging.NOTSET)
 
-    ds_types = ("squad", "squad_GA", "squad_+NER", "medquad", "squad_NA", "squad_repeat_q")
+    ds_types = ("squad", "squad_GA", "squad_+NER", "medquad", "squad_NA", "squad_repeat_q", "squad_repeat_q_mturk_only")
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-vocab_size', help='Size of the vocabulary to use for training', default=20000)
@@ -86,7 +86,7 @@ if __name__ == '__main__':
 
     ds_name = args.dataset_name
     data_home = f"{NQG_DATA_HOME}/"
-    if ds_name in ("squad", "medquad", "squad_+NER", "squad_repeat_q"):
+    if ds_name in ("squad", "medquad", "squad_+NER", "squad_repeat_q", "squad_repeat_q_mturk_only"):
         data_home += ds_name
         bio_dir = data_home
     else:

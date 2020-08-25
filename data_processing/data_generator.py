@@ -22,7 +22,10 @@ from defs import NQG_MODEL_DIR, NQG_DATA_HOME, MEDQUAD_DIR, MEDQUAD_DEV, MEDQUAD
     REPEAT_Q_RAW_DATASETS, SQUAD_FACTS_TRAIN, SQUAD_FACTS_DEV, SQUAD_REWRITES_DEV, SQUAD_REWRITES_TRAIN, \
     ASS2S_PROCESSED_SQUAD_MPQG_DATA, REPEAT_Q_SQUAD_DATA_DIR, NQG_SQUAD_DATASET, \
     SQUAD_REWRITES_TRAIN_AMAZON_TURK_1_JSON, SQUAD_REWRITES_TRAIN_AMAZON_TURK_2_JSON, \
-    SQUAD_REWRITES_TEST_AMAZON_TURK_JSON
+    SQUAD_REWRITES_TEST_AMAZON_TURK_JSON, SQUAD_REWRITES_TRIPLES_TRAIN_AMAZON_TURK_1_JSON, \
+    SQUAD_REWRITES_TRIPLES_TRAIN_AMAZON_TURK_2_JSON, SQUAD_REWRITES_TRIPLES_TEST_AMAZON_TURK_JSON, \
+    SQUAD_REWRITES_MAPPED_TRIPLES_TRAIN_AMAZON_TURK_JSON, SQUAD_REWRITES_MAPPED_TRIPLES_TRAIN_SYNTH_JSON, \
+    SQUAD_REWRITES_MAPPED_TRIPLES_TEST_AMAZON_TURK_JSON
 from data_processing.nqg_dataset import NQGDataset
 from data_processing.pre_processing import NQGDataPreprocessor
 import numpy as np
@@ -267,7 +270,7 @@ def generate_hotpot_targets(json_data_path, savepath):
     np.savetxt(savepath, targets, fmt="%s", delimiter="\n", comments=None)
 
 
-def generate_repeat_q_squad_raw():
+def generate_repeat_q_squad_raw(use_triples: bool, mapped_triples: bool):
     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     nlp = stanza.Pipeline(lang='en', processors='tokenize,pos,ner')
 
@@ -280,9 +283,28 @@ def generate_repeat_q_squad_raw():
     question_to_facts_map_dev = read_squad_qmap_files(qmap_dirpath=SQUAD_FACTS_DEV)
 
     # Organic data (amazon turk)
-    org_examples_train = read_squad_rewrites_human_made(dirpath=SQUAD_REWRITES_TRAIN_AMAZON_TURK_1_JSON)
-    org_examples_train.extend(read_squad_rewrites_human_made(dirpath=SQUAD_REWRITES_TRAIN_AMAZON_TURK_2_JSON))
-    org_examples_test = read_squad_rewrites_human_made(dirpath=SQUAD_REWRITES_TEST_AMAZON_TURK_JSON)
+    if use_triples:
+        if mapped_triples:
+            train_1 = SQUAD_REWRITES_MAPPED_TRIPLES_TRAIN_AMAZON_TURK_JSON
+            train_2 = SQUAD_REWRITES_MAPPED_TRIPLES_TRAIN_SYNTH_JSON
+            test = SQUAD_REWRITES_MAPPED_TRIPLES_TEST_AMAZON_TURK_JSON
+        else:
+            train_1 = SQUAD_REWRITES_TRIPLES_TRAIN_AMAZON_TURK_1_JSON
+            train_2 = SQUAD_REWRITES_TRIPLES_TRAIN_AMAZON_TURK_2_JSON
+            test = SQUAD_REWRITES_TRIPLES_TEST_AMAZON_TURK_JSON
+    else:
+        train_1 = SQUAD_REWRITES_TRAIN_AMAZON_TURK_1_JSON
+        train_2 = SQUAD_REWRITES_TRAIN_AMAZON_TURK_2_JSON
+        test = SQUAD_REWRITES_TEST_AMAZON_TURK_JSON
+    org_examples_train = read_squad_rewrites_human_made(
+        dirpath=train_1, use_triples=use_triples, mapped_triples=mapped_triples
+    )
+    org_examples_train.extend(read_squad_rewrites_human_made(
+        dirpath=train_2, use_triples=use_triples, mapped_triples=mapped_triples
+    ))
+    org_examples_test = read_squad_rewrites_human_made(
+        dirpath=test, use_triples=use_triples, mapped_triples=mapped_triples
+    )
 
     question_to_answers_map = get_squad_question_to_answers_map()
 
@@ -337,7 +359,13 @@ def generate_repeat_q_squad_raw():
             # Create example placeholders and filter out irrelevant question words for future word matching
             analyzed_question = nlp(_base_question)
             analyzed_target = nlp(_rewritten_question)
-            analyzed_facts = [fact_sentence for fact in _facts for fact_sentence in nlp(fact).sentences]
+            if use_triples:
+                if mapped_triples:
+                    analyzed_facts = [nlp(triple).sentences[0] for triple in _facts]
+                else:
+                    analyzed_facts = [nlp(triple).sentences[0] for fact in _facts for triple in fact]
+            else:
+                analyzed_facts = [fact_sentence for fact in _facts for fact_sentence in nlp(fact).sentences]
             base_question_entity_tags, facts_entity_tags = _get_entity_tags(analyzed_question, _answers, analyzed_facts)
             question_words = list(analyzed_question.iter_words())
             example = {
@@ -372,35 +400,46 @@ def generate_repeat_q_squad_raw():
     ]:
         ds = []
 
-        for passage_id in tqdm(list(question_to_facts_map.keys())):
-            questions = rewrites[passage_id]
-            question_to_facts = question_to_facts_map[passage_id]
-            for question in questions:
-                base_question = question["base_question"]
-                rephrased = question["rephrased"]
-                answers = question_to_answers_map[base_question.strip()]
-                if base_question in question_to_facts:
-                    fact_ids = question_to_facts[base_question]
-                    passage_facts = [facts[passage_id][fact_id]["text"] for fact_id in fact_ids]
-                    ex = _make_example(base_question, rephrased, passage_facts, answers, passage_id)
-                    if ex is not None:
-                        ds.append(ex)
+        for example in tqdm(organic_examples
 
-        for example in tqdm(organic_examples):
+                            ):
             answers = question_to_answers_map[example["base_question"].strip()]
             ex = _make_example(example["base_question"], example["target"], example["facts"], answers, -1)
             if ex is not None:
                 ds.append(ex)
 
+        if not use_triples:
+            for passage_id in tqdm(list(question_to_facts_map.keys())):
+                questions = rewrites[passage_id]
+                question_to_facts = question_to_facts_map[passage_id]
+                for question in questions:
+                    base_question = question["base_question"]
+                    rephrased = question["rephrased"]
+                    answers = question_to_answers_map[base_question.strip()]
+                    if base_question in question_to_facts:
+                        fact_ids = question_to_facts[base_question]
+                        passage_facts = [facts[passage_id][fact_id]["text"] for fact_id in fact_ids]
+                        ex = _make_example(base_question, rephrased, passage_facts, answers, passage_id)
+                        if ex is not None:
+                            ds.append(ex)
+
         if not os.path.exists(REPEAT_Q_RAW_DATASETS):
             os.mkdir(REPEAT_Q_RAW_DATASETS)
-        with open(f"{REPEAT_Q_RAW_DATASETS}/squad_{ds_type}.json", mode='w') as f:
+        ds_filename = f"{REPEAT_Q_RAW_DATASETS}/squad"
+        if mapped_triples:
+            ds_filename = f"{ds_filename}_mapped"
+        if use_triples:
+            ds_filename = f"{ds_filename}_triples"
+        ds_filename = f"{ds_filename}_{ds_type}.json"
+        with open(ds_filename, mode='w') as f:
             json.dump(ds, f, indent=4)
 
 
-def repeat_q_to_nqg_squad():
+def repeat_q_to_nqg_squad(organic_only):
     data_dir = REPEAT_Q_SQUAD_DATA_DIR
     target_dir = f"{NQG_SQUAD_DATASET}_repeat_q"
+    if organic_only:
+        target_dir = f"{target_dir}_mturk_only"
 
     os.mkdir(target_dir)
 
@@ -413,6 +452,8 @@ def repeat_q_to_nqg_squad():
         sep_tok = "GSDASSEP"
         bios, ners, poss, sources, targets, cases = [], [], [], [], [], []
         for data in _read_data(mode):
+            if organic_only and data.passage_id != -1:
+                continue
             sources.append(f"{data.base_question} {sep_tok.lower()} {' '.join([fact for fact in data.facts])}")
             targets.append(data.rephrased_question)
             ners.append(
@@ -423,11 +464,14 @@ def repeat_q_to_nqg_squad():
                 f"{data.base_question_features.letter_cases} {sep_tok} {' '.join([feat.letter_cases for feat in data.facts_features])}")
             bios.append(
                 f"{data.base_question_features.entity_tags} {sep_tok} {' '.join([feat.entity_tags for feat in data.facts_features])}")
+            if not(len(ners[-1].split()) == len(poss[-1].split()) == len(cases[-1].split()) == len(bios[-1].split()) == len(sources[-1].split())):
+                exit(-1)
 
-        os.mkdir(f"{target_dir}/{mode}")
+        save_dir_name = f"{target_dir}/{mode}"
+        os.mkdir(save_dir_name)
         for data_name, content in (("source.txt", sources), ("target.txt", targets), ("bio", bios), ("case", cases),
                                    ("ner", ners), ("pos", poss)):
-            fname = f"{target_dir}/{mode}/data.txt.{data_name}"
+            fname = f"{save_dir_name}/data.txt.{data_name}"
             np.savetxt(fname, content, fmt="%s")
 
 
@@ -467,11 +511,20 @@ if __name__ == '__main__':
     elif args.dataset_name == "nqg_hotpotqa":
         generate_nqg_features('dev', 'hotpotqa')
         generate_nqg_features('train', 'hotpotqa')
-    elif args.dataset_name == "repeat_q_squad":
-        generate_repeat_q_squad_raw()
-        info("Raw SQuAD dataset for RepeatQ generated.")
-    elif args.dataset_name == "nqg_repeat_q_squad":
-        repeat_q_to_nqg_squad()
+    elif "repeat_q_squad" in args.dataset_name:
+        use_triples = False
+        mapped_triples = False
+        if "triples" in args.dataset_name:
+            use_triples = True
+        if "mapped" in args.dataset_name:
+            mapped_triples = True
+        generate_repeat_q_squad_raw(use_triples=use_triples, mapped_triples=mapped_triples)
+        info(f"Raw SQuAD dataset for {args.dataset_name} generated.")
+    elif "nqg_repeat_q_squad" in args.dataset_name:
+        organic_only = False
+        if "mturk_only" in args.dataset_name:
+            organic_only = True
+        repeat_q_to_nqg_squad(organic_only)
         info("RepeatQ SQuAD for NQG generated.")
     else:
         raise ValueError("Non-existing dataset type")

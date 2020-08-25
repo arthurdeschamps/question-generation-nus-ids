@@ -29,7 +29,8 @@ class ModelConfiguration:
                  training_beam_search_size=5,
                  nb_episodes=32,
                  use_ner_features=True,
-                 use_pos_features=True):
+                 use_pos_features=True,
+                 mixed_data=False):
         super(ModelConfiguration, self).__init__()
         self.recurrent_dropout = recurrent_dropout
         self.dropout_rate = dropout_rate
@@ -59,11 +60,16 @@ class ModelConfiguration:
         self.nb_episodes = nb_episodes
         self.use_ner_features = use_ner_features
         self.use_pos_features = use_pos_features
+        self.mixed_data = mixed_data
 
     @staticmethod
     def new() -> 'ModelConfiguration':
         config = ModelConfiguration()
         return config
+
+    def with_mixed_data(self, mixed_data):
+        self.mixed_data = mixed_data
+        return self
 
     def with_ner_features(self, use_ner_features):
         self.use_ner_features = use_ner_features

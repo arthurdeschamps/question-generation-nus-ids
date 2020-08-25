@@ -13,7 +13,8 @@ from tqdm import tqdm
 from data_processing.repeat_q_dataset import RepeatQDataset
 from defs import UNKNOWN_TOKEN, REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_RAW_DATASETS, GLOVE_PATH, PAD_TOKEN, \
     REPEAT_Q_EMBEDDINGS_FILENAME, REPEAT_Q_VOCABULARY_FILENAME, REPEAT_Q_DATA_DIR, EOS_TOKEN, \
-    REPEAT_Q_TRAIN_CHECKPOINTS_DIR, REPEAT_Q_SQUAD_OUTPUT_FILEPATH, REPEAT_Q_FEATURE_VOCABULARY_FILENAME, ASS2S_DIR
+    REPEAT_Q_TRAIN_CHECKPOINTS_DIR, REPEAT_Q_SQUAD_OUTPUT_FILEPATH, REPEAT_Q_FEATURE_VOCABULARY_FILENAME, ASS2S_DIR, \
+    REPEAT_Q_PREDS_OUTPUT_DIR
 from models.RepeatQ.model import RepeatQ
 from models.RepeatQ.model_config import ModelConfiguration
 from models.RepeatQ.trainer import RepeatQTrainer
@@ -30,7 +31,7 @@ def make_tf_dataset(base_questions, question_features, facts_list, facts_feature
             for i in range(len(base_questions)):
                 # Passage id is -1 for organic dataset. When training, we separate the 2 datasets and train on them
                 # in different epochs. For test and dev, we keep everything together
-                if is_training and ((passage_ids[i] == -1 and is_synthetic) or
+                if is_training and not config.mixed_data and ((passage_ids[i] == -1 and is_synthetic) or
                                     (passage_ids[i] != -1 and not is_synthetic)):
                     continue
                 # For performance assessment, we only use organic data
@@ -89,20 +90,32 @@ def make_tf_dataset(base_questions, question_features, facts_list, facts_feature
 
     ds_synth = tf.data.Dataset.from_generator(_gen(True), output_types=output_types)
     ds_org = tf.data.Dataset.from_generator(_gen(False), output_types=output_types)
+
+    # For mixed data, we simply mix the synthetic and organic datasets together
+    if config.mixed_data:
+        ds = ds_org.concatenate(ds_org)
+        if shuffle:
+            ds = ds.shuffle(buffer_size=len(passage_ids), reshuffle_each_iteration=True)
+        return ds.batch(batch_size=config.batch_size, drop_remainder=drop_remainder)
+
     if shuffle:
         synth_size = len([p_id for p_id in passage_ids if p_id != -1])
         organic_size = len([p_id for p_id in passage_ids if p_id == -1])
-        ds_synth = ds_synth.shuffle(buffer_size=synth_size, reshuffle_each_iteration=True)
-        ds_org = ds_org.shuffle(buffer_size=organic_size, reshuffle_each_iteration=True)
+
+        if synth_size > 0:
+            ds_synth = ds_synth.shuffle(buffer_size=synth_size, reshuffle_each_iteration=True)
+        if organic_size > 0:
+            ds_org = ds_org.shuffle(buffer_size=organic_size, reshuffle_each_iteration=True)
     ds_synth = ds_synth.batch(batch_size=config.batch_size, drop_remainder=drop_remainder)
     ds_org = ds_org.batch(batch_size=config.batch_size, drop_remainder=drop_remainder)
     return {"synthetic": ds_synth, "organic": ds_org}
 
 
-def get_data(data_dir, vocabulary, feature_vocabulary, data_limit, config: ModelConfiguration):
+def get_data(data_dir, vocabulary, feature_vocabulary, data_limit, config: ModelConfiguration,
+             data_modes=("train", "dev", "test")):
     info("Preparing dataset...")
     datasets = {}
-    for mode in ("train", "dev", "test"):
+    for mode in data_modes:
         base_questions, question_features, facts, fact_features, targets, targets_copy_indicator, \
             is_from_base_question_indicators, passage_ids = \
             RepeatQDataset(
@@ -139,9 +152,9 @@ def build_vocabulary(vocabulary_path):
     return token_to_id
 
 
-def train(data_dir, data_limit, batch_size, learning_rate, synth_supervised_epochs, org_supervised_epochs,
+def train(ds_name, data_limit, batch_size, learning_rate, synth_supervised_epochs, org_supervised_epochs,
           checkpoint_name, save_model, nb_episodes, recurrent_dropout, attention_dropout, dropout_rate,
-          use_pos, use_ner):
+          use_pos, use_ner, mixed_data):
     config = ModelConfiguration.new() \
         .with_batch_size(batch_size) \
         .with_synth_supervised_epochs(synth_supervised_epochs) \
@@ -152,7 +165,8 @@ def train(data_dir, data_limit, batch_size, learning_rate, synth_supervised_epoc
         .with_attention_dropout(attention_dropout) \
         .with_recurrent_dropout(recurrent_dropout) \
         .with_pos_features(use_pos) \
-        .with_ner_features(use_ner)
+        .with_ner_features(use_ner) \
+        .with_mixed_data(mixed_data)
     tf.print(str(config))
     if learning_rate is not None:
         config = config.with_learning_rate(learning_rate)
@@ -161,6 +175,7 @@ def train(data_dir, data_limit, batch_size, learning_rate, synth_supervised_epoc
     vocabulary = build_vocabulary(config.vocabulary_path)
     feature_vocabulary = build_vocabulary(config.feature_vocabulary_path)
     # Gets the default vocabulary from NQG from now
+    data_dir = f"{REPEAT_Q_DATA_DIR}/{ds_name}"
     data = get_data(data_dir, vocabulary, feature_vocabulary, data_limit, config)
     training_data, dev_data, test_data = data["train"], data["dev"], data["test"]
     model = RepeatQ(vocabulary, config)
@@ -168,10 +183,10 @@ def train(data_dir, data_limit, batch_size, learning_rate, synth_supervised_epoc
     trainer.train()
 
 
-def translate(model_dir, data_dir, use_pos, use_ner):
+def translate(model_dir, ds_name, use_pos, use_ner):
     config = ModelConfiguration.new().with_batch_size(32).with_pos_features(use_pos).with_ner_features(use_ner)
 
-    save_path = REPEAT_Q_SQUAD_OUTPUT_FILEPATH
+    save_path = f"{REPEAT_Q_PREDS_OUTPUT_DIR}/{ds_name}_predictions.txt"
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
 
@@ -182,11 +197,12 @@ def translate(model_dir, data_dir, use_pos, use_ner):
     reverse_voc = _reverse_voc(vocabulary)
     feature_voc = build_vocabulary(config.feature_vocabulary_path)
     data = get_data(
-        data_dir=data_dir,
+        data_dir=f"{REPEAT_Q_DATA_DIR}/{ds_name}",
         vocabulary=vocabulary,
         feature_vocabulary=feature_voc,
         data_limit=-1,
-        config=config
+        config=config,
+        data_modes=["test"]
     )["test"]
     model = RepeatQ(vocabulary, config)
     model.load_weights(model_dir)
@@ -341,16 +357,12 @@ if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = "5"
     parser = argparse.ArgumentParser()
     parser.add_argument("action", default="train", type=str, choices=("translate", "preprocess", "train"))
-    parser.add_argument("-data_dir", help="Used if action is train or translate. Directory path where all the data "
-                                          "files are located.", type=str, required=False,
-                        default=REPEAT_Q_SQUAD_DATA_DIR)
     parser.add_argument("-save_dir", help="Used if action is preprocess. Base directory where the processed files will "
                                           "be saved.", type=str, required=False, default=REPEAT_Q_DATA_DIR)
-    parser.add_argument("-ds_name", help="Used if action is preprocess. A simple string indicating the name of the "
-                                         "dataset to create. This will be used in addition to the 'save_dir' argument, "
-                                         "if provided, or to the default data directory, to compute the final data "
-                                         "paths",
-                        required=False, default=None,
+    parser.add_argument("-ds_name", help="Name of the dataset directory to work with. It will be looked for at the "
+                                         "dedicated path in th project files. Please check the README to know where "
+                                         "to place your dataset(s).",
+                        required=False, default="squad",
                         type=str)
     parser.add_argument("-data_limit", help="Number of examples to use for training. Default to -1, which means "
                                             "taking the whole dataset.", type=int, default=-1, required=False)
@@ -395,14 +407,18 @@ if __name__ == '__main__':
                              "will be loaded and directly used to make predictions. When in train or train_rl mode,"
                              " training will resume from the checkpoint and continue with the provided parameters.")
     parser.add_argument("--save_model", action="store_true", help="Add this flag to save checkpoints while training.")
+    parser.add_argument("--mixed_data", action="store_true", help="Enables training on both the synthetic and the"
+                                                                  " organic (Mturk) dataset within the same epoch. "
+                                                                  "With this option activated we will run as many "
+                                                                  "epochs as the sum of the number of synthetic and "
+                                                                  "organic epochs.")
     args = parser.parse_args()
 
     use_pos = not args.no_pos_features
     use_ner = not args.no_ner_indicators
     if args.action == "train":
-        assert args.data_dir is not None
         train(
-            data_dir=args.data_dir,
+            ds_name=args.ds_name,
             data_limit=args.data_limit,
             batch_size=args.batch_size,
             learning_rate=args.learning_rate,
@@ -415,7 +431,8 @@ if __name__ == '__main__':
             attention_dropout=args.attention_dropout_rate,
             dropout_rate=args.dropout_rate,
             use_pos=use_pos,
-            use_ner=use_ner
+            use_ner=use_ner,
+            mixed_data=args.mixed_data
         )
         info("Training completed.")
     elif args.action == "preprocess":
@@ -424,6 +441,6 @@ if __name__ == '__main__':
                    args.pretrained_embeddings_path)
         info("Preprocessing completed successfully.")
     elif args.action == "translate":
-        assert args.model_checkpoint_name is not None and args.data_dir is not None
-        translate(f"{REPEAT_Q_TRAIN_CHECKPOINTS_DIR}/{args.model_checkpoint_name}", args.data_dir, use_ner, use_pos)
+        assert args.model_checkpoint_name is not None and args.ds_name is not None
+        translate(f"{REPEAT_Q_TRAIN_CHECKPOINTS_DIR}/{args.model_checkpoint_name}", args.ds_name, use_ner, use_pos)
         info("Translation completed.")

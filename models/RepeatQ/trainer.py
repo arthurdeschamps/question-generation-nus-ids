@@ -44,23 +44,33 @@ class RepeatQTrainer:
         env = self._build_environment()
         model_save_dir = RepeatQTrainer.prepare_model_save_dir()
 
-        nb_epochs_config = {
-            "synthetic": self.config.synth_supervised_epochs, "organic": self.config.org_supervised_epochs
-        }
-        for ds_type in self.training_data.keys():
-            nb_epochs = nb_epochs_config[ds_type]
+        def train(nb_epochs, data, dev_data, ds_type):
             tf.print("About to start training for ", nb_epochs, " epochs with ", ds_type, " dataset.")
             for epoch in range(nb_epochs):
                 phase = self.phase(epoch)
 
-                for features, label in tqdm(self.training_data[ds_type]):
+                for features, label in tqdm(data):
                     self.train_step(features, label, env, phase=phase, epoch=epoch, ds_type=ds_type)
 
-                dev_score = self.dev_step(phase, env, ds_type)
+                dev_score = self.dev_step(phase, env, dev_data)
                 tf.print("Score on dev set:", dev_score)
                 if self.config.saving_model:
-                    checkpoint_filename = f"{model_save_dir}/{phase}_{ds_type}_epoch_{epoch+1}_bleu_{'%.2f' % dev_score}"
+                    checkpoint_filename = f"{model_save_dir}/{phase}_{ds_type}_epoch_{epoch + 1}_bleu_{'%.2f' % dev_score}"
                     self.model.save_weights(filepath=checkpoint_filename)
+
+        nb_epochs_config = {
+            "synthetic": self.config.synth_supervised_epochs, "organic": self.config.org_supervised_epochs
+        }
+
+        if self.config.mixed_data:
+            nb_epochs = sum(nb_epochs_config.values())
+            train(nb_epochs=nb_epochs, data=self.training_data, dev_data=self.dev_data, ds_type="mixed")
+
+        for ds_type in self.training_data.keys():
+            nb_epochs = nb_epochs_config[ds_type]
+            data = self.training_data[ds_type]
+            dev_data = self.dev_data[ds_type]
+            train(nb_epochs=nb_epochs, data=data, dev_data=dev_data, ds_type=ds_type)
 
     @tf.function
     def train_step(self, features, labels, environment, phase, epoch, ds_type):
@@ -73,9 +83,8 @@ class RepeatQTrainer:
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         return loss
 
-    def dev_step(self, phase, env, ds_type):
+    def dev_step(self, phase, env, dev_data):
         tf.print("Performing dev step...")
-        dev_data = self.dev_data[ds_type]
         if self.config.dev_step_size is not None and self.config.dev_step_size > 0:
             dev_step_size = self.config.dev_step_size
             dev_data = dev_data.take(dev_step_size)
