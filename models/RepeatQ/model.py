@@ -93,14 +93,6 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             self.Z_copy(self.Z_copy_dropout(facts_att_vector))
         ))
 
-        # Probability of copying a word from the base question
-        # q_copy_prob = tf.math.sigmoid(self.W_q_copy(self.W_q_copy_dropout(hidden_state)) +
-        #                               self.U_q_copy(self.U_q_copy_dropout(question_att_vector)))
-
-        # Same but with facts
-        # f_copy_prob = tf.math.sigmoid(self.W_f_copy(self.W_f_copy_dropout(hidden_state)) +
-        #                               self.U_f_copy(self.U_f_copy_dropout(facts_att_vector)))
-
         # Only decodes further for non-finished beams (last token wasn't a padding token or a question mark)
         mask = tf.expand_dims(tf.logical_or(
             tf.logical_and(
@@ -220,7 +212,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
                 is_first_step=False
             )
             ite = tf.add(ite, 1)
-            finished = tf.logical_or(finished, tf.repeat(tf.equal(size, ite), repeats=(tf.shape(target)[0],)))
+            finished = tf.logical_or(finished, tf.repeat(tf.equal(size, ite), repeats=(tf.shape(base_question)[0],)))
             if phase == RepeatQTrainer.supervised_phase and training:
                 # Goes all the way to the target length
                 finished = tf.logical_or(finished, tf.equal(target[:, tf.minimum(size - 1, ite)], 0))
@@ -397,6 +389,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
 
         def zero_out(x):
             return tf.where(tf.equal(x, 0), tf.zeros_like(x), x)
+
         # Prevents copying padding tokens by zero-ing out the logits where 0 tokens are found
         base_question_logits = zero_out(base_question_logits)
         # Same for facts logits

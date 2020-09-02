@@ -2,45 +2,41 @@ import argparse
 import json
 import logging
 import os
-import random
 import sys
 from logging import info
-from typing import Dict
+from typing import Dict, List
 import tensorflow as tf
 import numpy as np
 from tqdm import tqdm
 
+from data_processing.class_defs import RepeatQExample
 from data_processing.repeat_q_dataset import RepeatQDataset
-from defs import UNKNOWN_TOKEN, REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_RAW_DATASETS, GLOVE_PATH, PAD_TOKEN, \
+from defs import UNKNOWN_TOKEN, REPEAT_Q_RAW_DATASETS, GLOVE_PATH, PAD_TOKEN, \
     REPEAT_Q_EMBEDDINGS_FILENAME, REPEAT_Q_VOCABULARY_FILENAME, REPEAT_Q_DATA_DIR, EOS_TOKEN, \
-    REPEAT_Q_TRAIN_CHECKPOINTS_DIR, REPEAT_Q_SQUAD_OUTPUT_FILEPATH, REPEAT_Q_FEATURE_VOCABULARY_FILENAME, ASS2S_DIR, \
+    REPEAT_Q_TRAIN_CHECKPOINTS_DIR, REPEAT_Q_FEATURE_VOCABULARY_FILENAME, ASS2S_DIR, \
     REPEAT_Q_PREDS_OUTPUT_DIR
 from models.RepeatQ.model import RepeatQ
 from models.RepeatQ.model_config import ModelConfiguration
 from models.RepeatQ.trainer import RepeatQTrainer
-
 sys.path.append(ASS2S_DIR + '/submodule/')
 from mytools import remove_adjacent_duplicate_grams
 
-
-def make_tf_dataset(base_questions, question_features, facts_list, facts_features, targets, targets_copy_indicator,
-                    is_from_base_question_indicators, passage_ids, config, shuffle=True, drop_remainder=True,
-                    is_training=True):
-    def _gen(is_synthetic):
+def make_tf_dataset(examples: List[RepeatQExample], config, shuffle=True, drop_remainder=True, is_training=True):
+    def _gen(synth_dataset):
         def _gen_ds():
-            for i in range(len(base_questions)):
-                # Passage id is -1 for organic dataset. When training, we separate the 2 datasets and train on them
+            for example in examples:
+                # When training, we separate the organic and synthetic datasets and train on them
                 # in different epochs. For test and dev, we keep everything together
-                if is_training and not config.mixed_data and ((passage_ids[i] == -1 and is_synthetic) or
-                                    (passage_ids[i] != -1 and not is_synthetic)):
+                if is_training and not config.mixed_data and ((not example.is_synthetic_data and synth_dataset) or
+                                                              (example.is_synthetic_data and not synth_dataset)):
                     continue
                 # For performance assessment, we only use organic data
-                if not is_training and passage_ids[i] != -1:
+                if not is_training and example.is_synthetic_data:
                     continue
-                facts = facts_list[i]
-                f_features = facts_features[i]
-                base_question = base_questions[i]
-                q_features = question_features[i]
+                facts = example.facts
+                f_features = example.facts_features
+                base_question = example.base_question
+                q_features = example.base_question_features
                 if use_pos or use_ner:
                     f_features = [[feature[:tf.shape(facts)[1]] for feature in fact_features] for fact_features in
                                   f_features]
@@ -69,10 +65,10 @@ def make_tf_dataset(base_questions, question_features, facts_list, facts_feature
                           "facts_features": tf.cast(f_features, dtype=tf.float32),
                           "base_question": base_question,
                           "base_question_features": tf.cast(q_features, dtype=tf.float32),
-                          "passage_id": passage_ids[i],
-                          "target_copy_indicator": targets_copy_indicator[i],
-                          "from_base_question": is_from_base_question_indicators[i],
-                      }, targets[i]
+                          "target_copy_indicator": example.target_question_copy_indicator,
+                          "from_base_question": example.is_from_base_question,
+                          "is_synthetic": example.is_synthetic_data
+                }, example.rephrased_question
 
         return _gen_ds
 
@@ -82,9 +78,9 @@ def make_tf_dataset(base_questions, question_features, facts_list, facts_feature
             "facts_features": tf.float32,
             "base_question": tf.int32,
             "base_question_features": tf.float32,
-            "passage_id": tf.int32,
             "target_copy_indicator": tf.int32,
-            "from_base_question": tf.bool
+            "from_base_question": tf.bool,
+            "is_synthetic": tf.bool
         }, tf.int32
     )
 
@@ -95,12 +91,12 @@ def make_tf_dataset(base_questions, question_features, facts_list, facts_feature
     if config.mixed_data:
         ds = ds_org.concatenate(ds_org)
         if shuffle:
-            ds = ds.shuffle(buffer_size=len(passage_ids), reshuffle_each_iteration=True)
+            ds = ds.shuffle(buffer_size=len(examples), reshuffle_each_iteration=True)
         return ds.batch(batch_size=config.batch_size, drop_remainder=drop_remainder)
 
     if shuffle:
-        synth_size = len([p_id for p_id in passage_ids if p_id != -1])
-        organic_size = len([p_id for p_id in passage_ids if p_id == -1])
+        synth_size = len([ex for ex in examples if ex.is_synthetic_data])
+        organic_size = len(examples) - synth_size
 
         if synth_size > 0:
             ds_synth = ds_synth.shuffle(buffer_size=synth_size, reshuffle_each_iteration=True)
@@ -116,29 +112,20 @@ def get_data(data_dir, vocabulary, feature_vocabulary, data_limit, config: Model
     info("Preparing dataset...")
     datasets = {}
     for mode in data_modes:
-        base_questions, question_features, facts, fact_features, targets, targets_copy_indicator, \
-            is_from_base_question_indicators, passage_ids = \
-            RepeatQDataset(
+        dataset = RepeatQDataset(
                 f"{data_dir}/{mode}.data.json",
                 vocabulary=vocabulary,
                 feature_vocab=feature_vocabulary,
                 data_limit=data_limit,
                 use_ner_features=use_ner,
                 use_pos_features=use_pos
-            ).get_dataset()
+        ).get_dataset()
         datasets[mode] = make_tf_dataset(
-            base_questions=base_questions,
-            question_features=question_features,
-            facts_list=facts,
-            facts_features=fact_features,
-            targets=targets,
-            targets_copy_indicator=targets_copy_indicator,
-            is_from_base_question_indicators=is_from_base_question_indicators,
-            passage_ids=passage_ids,
+            examples=dataset,
             shuffle=mode != "test",
             drop_remainder=mode != "test",
             config=config,
-            is_training=mode == "train"
+            is_training=mode == "train",
         )
     info("Done.")
     return datasets
@@ -153,14 +140,13 @@ def build_vocabulary(vocabulary_path):
 
 
 def train(ds_name, data_limit, batch_size, learning_rate, synth_supervised_epochs, org_supervised_epochs,
-          checkpoint_name, save_model, nb_episodes, recurrent_dropout, attention_dropout, dropout_rate,
+          checkpoint_name, save_model, recurrent_dropout, attention_dropout, dropout_rate,
           use_pos, use_ner, mixed_data):
     config = ModelConfiguration.new() \
         .with_batch_size(batch_size) \
         .with_synth_supervised_epochs(synth_supervised_epochs) \
         .with_org_supervised_epochs(org_supervised_epochs) \
         .with_saving_model(save_model) \
-        .with_episodes(nb_episodes) \
         .with_dropout_rate(dropout_rate) \
         .with_attention_dropout(attention_dropout) \
         .with_recurrent_dropout(recurrent_dropout) \
@@ -183,8 +169,12 @@ def train(ds_name, data_limit, batch_size, learning_rate, synth_supervised_epoch
     trainer.train()
 
 
-def translate(model_dir, ds_name, use_pos, use_ner):
-    config = ModelConfiguration.new().with_batch_size(32).with_pos_features(use_pos).with_ner_features(use_ner)
+def translate(model_dir, ds_name, use_pos, use_ner, beam_search_size):
+    config = ModelConfiguration\
+        .new()\
+        .with_batch_size(32 if beam_search_size > 1 else 1)\
+        .with_pos_features(use_pos)\
+        .with_ner_features(use_ner)
 
     save_path = f"{REPEAT_Q_PREDS_OUTPUT_DIR}/{ds_name}_predictions.txt"
     if not os.path.exists(os.path.dirname(save_path)):
@@ -211,15 +201,19 @@ def translate(model_dir, ds_name, use_pos, use_ner):
         tokens = tokens.numpy()
         return " ".join([_reverse_voc[t] for t in tokens]).replace(" <blank>", "")
 
-    with open(save_path, mode='w') as pred_file:
+    with open(save_path, mode='w+') as pred_file:
         for feature, labels in data["organic"]:
-            preds = model.beam_search(feature, beam_search_size=5)
-            for pred, label, base_question, facts in zip(preds, labels, feature["base_question"], feature["facts"]):
+            if beam_search_size == 1:
+                preds, _ = model.get_actions(feature, None, training=False, phase=RepeatQTrainer.supervised_phase)
+            else:
+                preds = model.beam_search(feature, beam_search_size=beam_search_size)
+            for label, base_question, facts, pred in zip(labels, feature["base_question"], feature["facts"], preds):
                 translated = remove_adjacent_duplicate_grams(to_string(pred))
                 tf.print("Base question: ", to_string(base_question))
                 for fact in facts:
                     tf.print("Fact: ", to_string(fact))
                 tf.print("Target: ", to_string(label))
+                #tf.print(to_string(label))
                 tf.print("Prediction: ", translated, "\n")
                 pred_file.write(translated + "\n")
 
@@ -307,11 +301,12 @@ def preprocess(data_dirpath, save_dir, ds_name, voc_size, pretrained_embeddings_
         raise ValueError(err_message)
 
     ds_test_path = f"{data_dirpath}/{ds_name}_test.json"
-    if not os.path.isfile(ds_test_path):
-        raise ValueError(f"Dataset '{ds_test_path}' does not exist.")
     ds_train_path = f"{data_dirpath}/{ds_name}_train.json"
-    if not os.path.isfile(ds_train_path):
-        raise ValueError(f"Dataset '{ds_train_path}' does not exist.")
+    ds_dev_path = f"{data_dirpath}/{ds_name}_dev.json"
+
+    for path in (ds_test_path, ds_dev_path, ds_train_path):
+        if not os.path.isfile(path):
+            raise ValueError(f"Dataset '{path}' does not exist.")
 
     save_dir = f"{save_dir}/{ds_name}"
     if not os.path.isdir(save_dir):
@@ -321,12 +316,14 @@ def preprocess(data_dirpath, save_dir, ds_name, voc_size, pretrained_embeddings_
         ds_test = json.load(f)
     with open(ds_train_path, mode='r') as f:
         ds_train = json.load(f)
+    with open(ds_dev_path, mode='r') as f:
+        ds_dev = json.load(f)
 
     pad_token = PAD_TOKEN
     unk_token = UNKNOWN_TOKEN
     eos_token = EOS_TOKEN
 
-    all_data = ds_test + ds_train
+    all_data = ds_test + ds_train + ds_dev
     # Generate the feature vocabulary (POS tags, answer indicators, etc)
     generate_feature_vocabulary(all_data, save_dir)
     # Generate the word vocabulary
@@ -342,19 +339,13 @@ def preprocess(data_dirpath, save_dir, ds_name, voc_size, pretrained_embeddings_
             json.dump(data, f)
 
     _save_ds("test", ds_test)
-    # Split train into train/dev
-    random.shuffle(ds_train)
-    cut = int(0.9 * len(ds_train))
-    ds_train_train = ds_train[:cut]
-    ds_train_dev = ds_train[cut:]
-
-    _save_ds("dev", ds_train_dev)
-    _save_ds("train", ds_train_train)
+    _save_ds("train", ds_train)
+    _save_ds("dev", ds_dev)
 
 
 if __name__ == '__main__':
     logging.getLogger(__name__).setLevel(logging.NOTSET)
-    os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "12"
     parser = argparse.ArgumentParser()
     parser.add_argument("action", default="train", type=str, choices=("translate", "preprocess", "train"))
     parser.add_argument("-save_dir", help="Used if action is preprocess. Base directory where the processed files will "
@@ -400,8 +391,7 @@ if __name__ == '__main__':
                         help="Number of epochs to train the model in supervised mode for on the Amazon Turk collected"
                              "dataset.")
     parser.add_argument("-nb_epochs", type=int, default=20, help="Total number of epochs to train for.", required=False)
-    parser.add_argument("-nb_episodes", type=int, default=32, help="Number of episodes to collect per policy gradient"
-                                                                   " iteration.", required=False)
+    parser.add_argument("-beam_search_size", type=int, default=5, help="Beam search size to use during translation.")
     parser.add_argument("-model_checkpoint_name", type=str, required=False, default=None,
                         help="Name of a checkpoint of the model to resume from. When in translate mode, the model"
                              "will be loaded and directly used to make predictions. When in train or train_rl mode,"
@@ -426,7 +416,6 @@ if __name__ == '__main__':
             synth_supervised_epochs=args.synth_supervised_epochs,
             checkpoint_name=args.model_checkpoint_name,
             save_model=args.save_model,
-            nb_episodes=args.nb_episodes,
             recurrent_dropout=args.recurrent_dropout_rate,
             attention_dropout=args.attention_dropout_rate,
             dropout_rate=args.dropout_rate,
@@ -442,5 +431,6 @@ if __name__ == '__main__':
         info("Preprocessing completed successfully.")
     elif args.action == "translate":
         assert args.model_checkpoint_name is not None and args.ds_name is not None
-        translate(f"{REPEAT_Q_TRAIN_CHECKPOINTS_DIR}/{args.model_checkpoint_name}", args.ds_name, use_ner, use_pos)
+        translate(f"{REPEAT_Q_TRAIN_CHECKPOINTS_DIR}/{args.model_checkpoint_name}", args.ds_name, use_ner, use_pos,
+                  args.beam_search_size)
         info("Translation completed.")

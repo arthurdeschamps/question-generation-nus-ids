@@ -215,8 +215,8 @@ def read_squad_qmap_files(qmap_dirpath):
     return question_to_facts
 
 
-def read_squad_rewrites_human_made(dirpath, use_triples=False, mapped_triples=False):
-    with open(dirpath, mode="r") as f:
+def read_squad_rewrites(dataset_path, use_triples=False, mapped_triples=False):
+    with open(dataset_path, mode="r") as f:
         data = json.load(f)
         questions_to_facts = {}
         questions_to_rewrites = {}
@@ -228,13 +228,18 @@ def read_squad_rewrites_human_made(dirpath, use_triples=False, mapped_triples=Fa
                     ds.append({
                         "base_question": datapoint["question"],
                         "facts": [rf_pair["triple"]],
-                        "target": rf_pair["rewrite"]
+                        "target": rf_pair["rewrite"],
+                        "passage_id": -1
                     })
         else:
             for datapoint in data:
                 q = datapoint["question"]
-                fact = datapoint["triples"] if use_triples else datapoint["fact"]
-                rewrites = datapoint["rewrites"]
+                if use_triples:
+                    triples = [rfpair["triple"] for rfpair in datapoint["rfpairs"]]
+                    fact = " ".join(triples)
+                else:
+                    fact = datapoint["fact"]
+                rewrites = [rfpair["rewrite"] for rfpair in datapoint["rfpairs"]]
                 if q in questions_to_facts:
                     questions_to_facts[q].append(fact)
                     questions_to_rewrites[q].extend(rewrites)

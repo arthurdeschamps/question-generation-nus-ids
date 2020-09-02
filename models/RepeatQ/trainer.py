@@ -4,11 +4,9 @@ from logging import info
 from pathlib import Path
 
 import nltk
-import tensorflow_addons as tfa
 import tensorflow as tf
 from tqdm import tqdm
 from defs import PAD_TOKEN, TRAINED_MODELS_DIR
-from models.RepeatQ.model import RepeatQ
 from models.RepeatQ.model_config import ModelConfiguration
 from models.RepeatQ.rl.environment import RepeatQEnvironment
 
@@ -65,12 +63,12 @@ class RepeatQTrainer:
         if self.config.mixed_data:
             nb_epochs = sum(nb_epochs_config.values())
             train(nb_epochs=nb_epochs, data=self.training_data, dev_data=self.dev_data, ds_type="mixed")
-
-        for ds_type in self.training_data.keys():
-            nb_epochs = nb_epochs_config[ds_type]
-            data = self.training_data[ds_type]
-            dev_data = self.dev_data[ds_type]
-            train(nb_epochs=nb_epochs, data=data, dev_data=dev_data, ds_type=ds_type)
+        else:
+            for ds_type in self.training_data.keys():
+                nb_epochs = nb_epochs_config[ds_type]
+                data = self.training_data[ds_type]
+                dev_data = self.dev_data[ds_type]
+                train(nb_epochs=nb_epochs, data=data, dev_data=dev_data, ds_type=ds_type)
 
     @tf.function
     def train_step(self, features, labels, environment, phase, epoch, ds_type):

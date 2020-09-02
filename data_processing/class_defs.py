@@ -2,7 +2,6 @@ from abc import ABC
 from typing import List, Dict, Optional
 import nltk
 
-
 nltk.download('punkt')
 tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
 
@@ -99,15 +98,19 @@ class RepeatQExample(JsonParsable):
                  facts: List[str],
                  facts_features: List[str],
                  rephrased_question: Optional[str],
-                 passage_id: int,
-                 *args, **kwargs):
-        super(RepeatQExample, self).__init__(*args, **kwargs)
+                 is_synthetic_data: bool,
+                 target_question_copy_indicator: Optional[List[int]] = None,
+                 is_from_base_question: Optional[bool] = None
+                 ):
+        super(RepeatQExample, self).__init__()
         self.base_question = base_question
         self.base_question_features = base_question_features
         self.facts = facts
         self.facts_features = facts_features
         self.rephrased_question = rephrased_question
-        self.passage_id = passage_id
+        self.is_synthetic_data = is_synthetic_data
+        self.target_question_copy_indicator = target_question_copy_indicator
+        self.is_from_base_question = is_from_base_question
 
     @staticmethod
     def from_json(json) -> List['RepeatQExample']:
@@ -123,7 +126,7 @@ class RepeatQExample(JsonParsable):
             ) for pos, entity, ner, cases in zip(example["facts_pos_tags"], example["facts_entity_tags"],
                                                  example["facts_ner"], example["facts_letter_cases"])],
             rephrased_question=example["target"],
-            passage_id=example["passage_id"]
+            is_synthetic_data=example["is_synthetic"]
         ) for example in json]
 
 

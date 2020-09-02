@@ -51,23 +51,16 @@ class RepeatQDataset:
                 return data
             return data[:data_limit]
 
-    def get_dataset(self):
-        base_questions = []
-        base_questions_features = []
-        facts_list = []
-        facts_features = []
-        targets = []
+    def get_dataset(self) -> List[RepeatQExample]:
+        base_questions, base_questions_features, facts_list, facts_features, targets = [], [], [], [], []
         # Indicator of if a target word comes from the base question or one of the facts and at which location
         targets_question_copy_indicator = []
         # If a target word is present in the base question
         is_from_base_question = []
-        passage_ids = []
-        max_fact_length = 0
-        max_nb_facts = 0
+        max_fact_length, max_nb_facts = 0, 0
         for example in tqdm(self.ds):
             if example.rephrased_question == "":
                 continue
-            passage_ids.append(example.passage_id)
             target = self.words_to_ids(example.rephrased_question.split())
             targets.append(target)
             base_question = self.words_to_ids(example.base_question.split())
@@ -80,28 +73,34 @@ class RepeatQDataset:
             facts_list.append(facts)
             is_from_base_question.append([True if w in base_question else False for w in target])
 
-
-        if not self.pad_sequences:
-            return base_questions, facts_list, targets
         base_questions = self.sequence_padding(base_questions)
         targets = self.sequence_padding(targets)
         is_from_base_question = self.sequence_padding(is_from_base_question)
         facts_list = np.array(self.matrix_padding(facts_list, max_length=max_fact_length, max_width=max_nb_facts))
 
-        for base_question, facts, target in zip(base_questions, facts_list, targets):
+        for k in range(len(self.ds)):
+            base_question = base_questions[k]
+            target = targets[k]
             # Index in the base question if the word comes from the base question, -1 otherwise
             copy_indicators = [np.where(base_question == w)[0][0] if w != 0 and w in base_question else -1 for w in target]
             # Same for facts but offset by the base question's length. Each fact is also offset by the fact that comes
             # before itself. The final logits order is: [vocabulary, base question, fact 1, fact 2, ..., fact l]
             offset = len(base_question)
-            for fact in facts:
+            for fact in facts_list[k]:
                 for i in range(len(copy_indicators)):
                     if target[i] != 0 and target[i] in fact:
                         copy_indicators[i] = np.where(fact == target[i])[0][0] + offset
                 offset += len(fact)
-            targets_question_copy_indicator.append(copy_indicators)
-        return base_questions, base_questions_features, facts_list, facts_features, targets, \
-               targets_question_copy_indicator, is_from_base_question, passage_ids
+            # Updates the data with the padded features and inputs
+            self.ds[k].base_question = base_question
+            self.ds[k].base_question_features = base_questions_features[k]
+            self.ds[k].facts = facts_list[k]
+            self.ds[k].facts_features = facts_features[k]
+            self.ds[k].is_from_base_question = is_from_base_question
+            self.ds[k].target_question_copy_indicator = copy_indicators
+            self.ds[k].rephrased_question = target
+
+        return self.ds
 
     def words_to_ids(self, sentence: List[str]):
         return [self.vocab.get(word.lower(), self.vocab[self.unk_token]) for word in sentence]

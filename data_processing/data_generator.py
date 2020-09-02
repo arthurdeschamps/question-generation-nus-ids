@@ -3,35 +3,38 @@ import os
 import pathlib
 import shutil
 import subprocess
-from logging import info, warning, debug
+from logging import info
 
 import pandas as pd
 import nltk
 import stanza
-from stanza import Document
 from tqdm import tqdm
 
 from data_processing.class_defs import RepeatQExample
 from data_processing.mpqg_dataset import MPQGDataset
-from data_processing.parse import read_medquad_raw_dataset, read_squad_facts_files, \
-    read_squad_rewrites_files, read_squad_qmap_files, read_squad_rewrites_human_made, get_squad_question_to_answers_map
+from data_processing.parse import read_medquad_raw_dataset, read_squad_rewrites, get_squad_question_to_answers_map
 from data_processing.utils import array_to_string
 from defs import NQG_MODEL_DIR, NQG_DATA_HOME, MEDQUAD_DIR, MEDQUAD_DEV, MEDQUAD_TRAIN, \
     MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_RAW_DATASET_FILEPATH, HOTPOT_QA_DEV_JSON, \
-    HOTPOT_QA_DEV_TARGETS_PATH, \
-    REPEAT_Q_RAW_DATASETS, SQUAD_FACTS_TRAIN, SQUAD_FACTS_DEV, SQUAD_REWRITES_DEV, SQUAD_REWRITES_TRAIN, \
-    ASS2S_PROCESSED_SQUAD_MPQG_DATA, REPEAT_Q_SQUAD_DATA_DIR, NQG_SQUAD_DATASET, \
-    SQUAD_REWRITES_TRAIN_AMAZON_TURK_1_JSON, SQUAD_REWRITES_TRAIN_AMAZON_TURK_2_JSON, \
-    SQUAD_REWRITES_TEST_AMAZON_TURK_JSON, SQUAD_REWRITES_TRIPLES_TRAIN_AMAZON_TURK_1_JSON, \
-    SQUAD_REWRITES_TRIPLES_TRAIN_AMAZON_TURK_2_JSON, SQUAD_REWRITES_TRIPLES_TEST_AMAZON_TURK_JSON, \
-    SQUAD_REWRITES_MAPPED_TRIPLES_TRAIN_AMAZON_TURK_JSON, SQUAD_REWRITES_MAPPED_TRIPLES_TRAIN_SYNTH_JSON, \
-    SQUAD_REWRITES_MAPPED_TRIPLES_TEST_AMAZON_TURK_JSON
+    HOTPOT_QA_DEV_TARGETS_PATH, REPEAT_Q_RAW_DATASETS, ASS2S_PROCESSED_SQUAD_MPQG_DATA, REPEAT_Q_SQUAD_DATA_DIR, \
+    NQG_SQUAD_DATASET, SQUAD_REWRITE_MTURK_DIR, SQUAD_REWRITES_SYNTHETIC_JSON, ASS2S_PROCESSED_DIR
+
 from data_processing.nqg_dataset import NQGDataset
 from data_processing.pre_processing import NQGDataPreprocessor
 import numpy as np
 
 
 def generate_ass2s_mpqg_features(ds_name):
+
+    if not os.path.exists(ASS2S_PROCESSED_SQUAD_MPQG_DATA):
+        pathlib.Path(ASS2S_PROCESSED_SQUAD_MPQG_DATA).mkdir(parents=True, exist_ok=True)
+
+    def save_data(dir_name, ds_type, data):
+        if not os.path.exists(dir_name):
+            pathlib.Path(dir_name).mkdir(parents=True, exist_ok=True)
+        with open(f"{dir_name}/{ds_type}_sent_pre.json", mode='w+', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
     # The provided dataset for ASs2s has the following format:
     # 'textN': unused
     # 'annotation1' corresponds to the features of the context
@@ -43,7 +46,6 @@ def generate_ass2s_mpqg_features(ds_name):
     if ds_name == "squad":
         ds_train = MPQGDataset(mode="train")
         ds_test = MPQGDataset(mode="dev")
-
         c_dev, a_dev, q_dev, c_test, a_test, q_test = ds_test.get_split(0.5)
 
         def _generate_features(contexts, answers, questions, ds_type):
@@ -65,14 +67,71 @@ def generate_ass2s_mpqg_features(ds_name):
                     'annotation2': question,
                     'annotation3': answer
                 })
-            if not os.path.exists(ASS2S_PROCESSED_SQUAD_MPQG_DATA):
-                pathlib.Path(ASS2S_PROCESSED_SQUAD_MPQG_DATA).mkdir(parents=True, exist_ok=True)
-            with open(f"{ASS2S_PROCESSED_SQUAD_MPQG_DATA}/{ds_type}_sent_pre.json", mode='w', encoding='utf-8') as f:
-                json.dump(features, f, ensure_ascii=False, indent=2)
+            save_data(ASS2S_PROCESSED_SQUAD_MPQG_DATA, ds_type, features)
 
         _generate_features(*ds_train.get_dataset(), "train")
         _generate_features(c_dev, a_dev, q_dev, "dev")
         _generate_features(c_test, a_test, q_test, "test")
+    elif "squad_repeat_q" in ds_name:
+        processed_mpqg_data_dir = f"{ASS2S_PROCESSED_DIR}/{ds_name}"
+        tokenize = stanza.Pipeline(processors="tokenize")
+        modes = ("test", "dev", "train")
+        question_to_answers = {}
+        for mode in modes:
+            with open(f"{ASS2S_PROCESSED_SQUAD_MPQG_DATA}/{mode}_sent_pre.json") as data_file:
+                for data in tqdm(json.load(data_file)):
+                    base_question = " ".join(word.text.lower() for word in tokenize(data["annotation2"]).iter_words())
+                    question_to_answers[base_question] = data["annotation3"].lower()
+        for mode in modes:
+            data_dir = REPEAT_Q_SQUAD_DATA_DIR
+            with open(f"{data_dir}/{mode}.data.json") as data_file:
+                examples = json.load(data_file)
+
+            synthetic_examples = []
+            organic_examples = []
+
+            def get_ners(ners, base):
+                mapped_ners = []
+                current_word = []
+                current_ner = None
+                for ner, base_word in zip(ners.split(), base.split()):
+                    if ner == "O":
+                        if len(current_word) > 0:
+                            mapped_ners.append({"entity": " ".join(current_word), "ent_type": current_ner})
+                            current_word = []
+                    else:
+                        current_ner = ner
+                        current_word.append(base_word)
+                return mapped_ners
+
+            for example in tqdm(examples):
+                if mode == "test" and example["is_synthetic"]:
+                    continue
+                bq = example["base_question"]
+                if bq not in question_to_answers:
+                    print(f"Missing: {bq}")
+                    continue
+                bq_ners = get_ners(example["base_question_ner"], bq)
+                facts = example["facts"]
+                facts_ners = [get_ners(fact_ner, fact) for fact_ner, fact in zip(example["facts_ner"], facts)]
+                flattened_facts_ners = [ner for fact_ners in facts_ners for ner in fact_ners ]
+                context = bq + " gsdassep " + " ".join(facts)
+                context_ners = bq_ners + [{"entity": "gsdassep", "ent_type": "GSDASSEP"}] + flattened_facts_ners
+                feature = {
+                    "annotation1": {
+                        "toks": context,
+                        "NERs": context_ners
+                    },
+                    "annotation2": example["target"],
+                    "annotation3": question_to_answers[bq]
+                }
+                if example["is_synthetic"]:
+                    synthetic_examples.append(feature)
+                else:
+                    organic_examples.append(feature)
+
+            save_data(processed_mpqg_data_dir + "/mpqg_data", mode, synthetic_examples + organic_examples)
+            save_data(processed_mpqg_data_dir + "_mturk/mpqg_data", mode, organic_examples)
     else:
         raise NotImplementedError(f"Preprocessing for dataset {ds_name} not implemented yet.")
 
@@ -274,38 +333,6 @@ def generate_repeat_q_squad_raw(use_triples: bool, mapped_triples: bool):
     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     nlp = stanza.Pipeline(lang='en', processors='tokenize,pos,ner')
 
-    # Synthetic data (created through hard-coded rules)
-    facts_train = read_squad_facts_files(facts_dirpath=SQUAD_FACTS_TRAIN)
-    rewrites_train = read_squad_rewrites_files(rewrites_dirpath=SQUAD_REWRITES_TRAIN)
-    question_to_facts_map_train = read_squad_qmap_files(qmap_dirpath=SQUAD_FACTS_TRAIN)
-    facts_dev = read_squad_facts_files(facts_dirpath=SQUAD_FACTS_DEV)
-    rewrites_dev = read_squad_rewrites_files(rewrites_dirpath=SQUAD_REWRITES_DEV)
-    question_to_facts_map_dev = read_squad_qmap_files(qmap_dirpath=SQUAD_FACTS_DEV)
-
-    # Organic data (amazon turk)
-    if use_triples:
-        if mapped_triples:
-            train_1 = SQUAD_REWRITES_MAPPED_TRIPLES_TRAIN_AMAZON_TURK_JSON
-            train_2 = SQUAD_REWRITES_MAPPED_TRIPLES_TRAIN_SYNTH_JSON
-            test = SQUAD_REWRITES_MAPPED_TRIPLES_TEST_AMAZON_TURK_JSON
-        else:
-            train_1 = SQUAD_REWRITES_TRIPLES_TRAIN_AMAZON_TURK_1_JSON
-            train_2 = SQUAD_REWRITES_TRIPLES_TRAIN_AMAZON_TURK_2_JSON
-            test = SQUAD_REWRITES_TRIPLES_TEST_AMAZON_TURK_JSON
-    else:
-        train_1 = SQUAD_REWRITES_TRAIN_AMAZON_TURK_1_JSON
-        train_2 = SQUAD_REWRITES_TRAIN_AMAZON_TURK_2_JSON
-        test = SQUAD_REWRITES_TEST_AMAZON_TURK_JSON
-    org_examples_train = read_squad_rewrites_human_made(
-        dirpath=train_1, use_triples=use_triples, mapped_triples=mapped_triples
-    )
-    org_examples_train.extend(read_squad_rewrites_human_made(
-        dirpath=train_2, use_triples=use_triples, mapped_triples=mapped_triples
-    ))
-    org_examples_test = read_squad_rewrites_human_made(
-        dirpath=test, use_triples=use_triples, mapped_triples=mapped_triples
-    )
-
     question_to_answers_map = get_squad_question_to_answers_map()
 
     def _get_tokens(words):
@@ -354,7 +381,7 @@ def generate_repeat_q_squad_raw(use_triples: bool, mapped_triples: bool):
     def _get_cases(words):
         return " ".join(["UP" if word.text[0].isupper() else "LOW" for word in words])
 
-    def _make_example(_base_question, _rewritten_question, _facts, _answers, _passage_id):
+    def _make_example(_base_question, _rewritten_question, _facts, _answers, _is_synthetic):
         try:
             # Create example placeholders and filter out irrelevant question words for future word matching
             analyzed_question = nlp(_base_question)
@@ -381,7 +408,7 @@ def generate_repeat_q_squad_raw(use_triples: bool, mapped_triples: bool):
                 "facts_ner": [NQGDataPreprocessor.create_ner_sequence(True, fact.words)
                               for fact in analyzed_facts],
                 "target": _get_tokens(analyzed_target.iter_words()),
-                "passage_id": _passage_id,
+                "is_synthetic": _is_synthetic
             }
             return example
         except Exception as e:
@@ -394,34 +421,30 @@ def generate_repeat_q_squad_raw(use_triples: bool, mapped_triples: bool):
             [print(f) for f in _facts]
         return None
 
-    for question_to_facts_map, rewrites, facts, organic_examples, ds_type in [
-        (question_to_facts_map_dev, rewrites_dev, facts_dev, org_examples_test, "test"),
-        (question_to_facts_map_train, rewrites_train, facts_train, org_examples_train, "train")
-    ]:
+    for mode in ("test", "dev", "train"):
         ds = []
+        orga_filepath = f"{SQUAD_REWRITE_MTURK_DIR}/{mode}.json"
+        examples = {
+            "organic": read_squad_rewrites(
+                dataset_path=orga_filepath, use_triples=use_triples, mapped_triples=mapped_triples
+            ),
+            "synthetic": read_squad_rewrites(
+               SQUAD_REWRITES_SYNTHETIC_JSON, use_triples=use_triples, mapped_triples=mapped_triples
+            ) if mode == "train" else []
+        }
 
-        for example in tqdm(organic_examples
-
-                            ):
-            answers = question_to_answers_map[example["base_question"].strip()]
-            ex = _make_example(example["base_question"], example["target"], example["facts"], answers, -1)
-            if ex is not None:
-                ds.append(ex)
-
-        if not use_triples:
-            for passage_id in tqdm(list(question_to_facts_map.keys())):
-                questions = rewrites[passage_id]
-                question_to_facts = question_to_facts_map[passage_id]
-                for question in questions:
-                    base_question = question["base_question"]
-                    rephrased = question["rephrased"]
-                    answers = question_to_answers_map[base_question.strip()]
-                    if base_question in question_to_facts:
-                        fact_ids = question_to_facts[base_question]
-                        passage_facts = [facts[passage_id][fact_id]["text"] for fact_id in fact_ids]
-                        ex = _make_example(base_question, rephrased, passage_facts, answers, passage_id)
-                        if ex is not None:
-                            ds.append(ex)
+        for data_type in ("organic", "synthetic"):
+            for example in tqdm(examples[data_type]):
+                answers = question_to_answers_map[example["base_question"].strip()]
+                ex = _make_example(
+                    _base_question=example["base_question"],
+                    _rewritten_question=example["target"],
+                    _facts=example["facts"],
+                    _answers=answers,
+                    _is_synthetic=data_type == "synthetic"
+                )
+                if ex is not None:
+                    ds.append(ex)
 
         if not os.path.exists(REPEAT_Q_RAW_DATASETS):
             os.mkdir(REPEAT_Q_RAW_DATASETS)
@@ -430,7 +453,7 @@ def generate_repeat_q_squad_raw(use_triples: bool, mapped_triples: bool):
             ds_filename = f"{ds_filename}_mapped"
         if use_triples:
             ds_filename = f"{ds_filename}_triples"
-        ds_filename = f"{ds_filename}_{ds_type}.json"
+        ds_filename = f"{ds_filename}_{mode}.json"
         with open(ds_filename, mode='w') as f:
             json.dump(ds, f, indent=4)
 
@@ -452,7 +475,7 @@ def repeat_q_to_nqg_squad(organic_only):
         sep_tok = "GSDASSEP"
         bios, ners, poss, sources, targets, cases = [], [], [], [], [], []
         for data in _read_data(mode):
-            if organic_only and data.passage_id != -1:
+            if organic_only and data.is_synthetic_data:
                 continue
             sources.append(f"{data.base_question} {sep_tok.lower()} {' '.join([fact for fact in data.facts])}")
             targets.append(data.rephrased_question)
