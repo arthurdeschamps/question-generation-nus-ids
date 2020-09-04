@@ -21,6 +21,7 @@ from models.RepeatQ.trainer import RepeatQTrainer
 sys.path.append(ASS2S_DIR + '/submodule/')
 from mytools import remove_adjacent_duplicate_grams
 
+
 def make_tf_dataset(examples: List[RepeatQExample], config, shuffle=True, drop_remainder=True, is_training=True):
     def _gen(synth_dataset):
         def _gen_ds():
@@ -113,12 +114,13 @@ def get_data(data_dir, vocabulary, feature_vocabulary, data_limit, config: Model
     datasets = {}
     for mode in data_modes:
         dataset = RepeatQDataset(
-                f"{data_dir}/{mode}.data.json",
-                vocabulary=vocabulary,
-                feature_vocab=feature_vocabulary,
-                data_limit=data_limit,
-                use_ner_features=use_ner,
-                use_pos_features=use_pos
+            f"{data_dir}/{mode}.data.json",
+            vocabulary=vocabulary,
+            feature_vocab=feature_vocabulary,
+            data_limit=data_limit,
+            use_ner_features=use_ner,
+            use_pos_features=use_pos,
+            reduced_ner_indicators=config.reduced_ner_indicators
         ).get_dataset()
         datasets[mode] = make_tf_dataset(
             examples=dataset,
@@ -139,44 +141,49 @@ def build_vocabulary(vocabulary_path):
     return token_to_id
 
 
-def train(ds_name, data_limit, batch_size, learning_rate, synth_supervised_epochs, org_supervised_epochs,
-          checkpoint_name, save_model, recurrent_dropout, attention_dropout, dropout_rate,
-          use_pos, use_ner, mixed_data):
+def train(args):
     config = ModelConfiguration.new() \
-        .with_batch_size(batch_size) \
-        .with_synth_supervised_epochs(synth_supervised_epochs) \
-        .with_org_supervised_epochs(org_supervised_epochs) \
-        .with_saving_model(save_model) \
-        .with_dropout_rate(dropout_rate) \
-        .with_attention_dropout(attention_dropout) \
-        .with_recurrent_dropout(recurrent_dropout) \
+        .with_batch_size(args.batch_size) \
+        .with_synth_supervised_epochs(args.synth_supervised_epochs) \
+        .with_org_supervised_epochs(args.org_supervised_epochs) \
+        .with_saving_model(args.save_model) \
+        .with_save_directory_name(args.save_model_dir) \
+        .with_dropout_rate(args.dropout_rate) \
+        .with_attention_dropout(args.attention_dropout_rate) \
+        .with_recurrent_dropout(args.recurrent_dropout_rate) \
         .with_pos_features(use_pos) \
         .with_ner_features(use_ner) \
-        .with_mixed_data(mixed_data)
+        .with_mixed_data(args.mixed_data) \
+        .with_reduced_ner_indicators(args.reduced_ner_indicators)\
+        .with_question_encodings(not args.no_base_question_encodings)\
+        .with_glove_embeddings(not args.no_glove)
+
     tf.print(str(config))
-    if learning_rate is not None:
-        config = config.with_learning_rate(learning_rate)
-    if checkpoint_name is not None:
-        config = config.with_restore_supervised_checkpoint().with_supervised_model_checkpoint_path(checkpoint_name)
+    if args.learning_rate is not None:
+        config = config.with_learning_rate(args.learning_rate)
+    if args.checkpoint_name is not None:
+        config = config.with_restore_supervised_checkpoint().with_supervised_model_checkpoint_path(args.checkpoint_name)
     vocabulary = build_vocabulary(config.vocabulary_path)
     feature_vocabulary = build_vocabulary(config.feature_vocabulary_path)
     # Gets the default vocabulary from NQG from now
-    data_dir = f"{REPEAT_Q_DATA_DIR}/{ds_name}"
-    data = get_data(data_dir, vocabulary, feature_vocabulary, data_limit, config)
+    data_dir = f"{REPEAT_Q_DATA_DIR}/{args.ds_name}"
+    data = get_data(data_dir, vocabulary, feature_vocabulary, args.data_limit, config)
     training_data, dev_data, test_data = data["train"], data["dev"], data["test"]
     model = RepeatQ(vocabulary, config)
     trainer = RepeatQTrainer(config, model, training_data, dev_data, vocabulary)
     trainer.train()
 
 
-def translate(model_dir, ds_name, use_pos, use_ner, beam_search_size):
+def translate(model_dir, args):
     config = ModelConfiguration\
         .new()\
-        .with_batch_size(32 if beam_search_size > 1 else 1)\
+        .with_batch_size(32 if args.beam_search_size > 1 else 1)\
         .with_pos_features(use_pos)\
-        .with_ner_features(use_ner)
+        .with_ner_features(use_ner)\
+        .with_reduced_ner_indicators(args.reduced_ner_indicators)\
+        .with_question_encodings(not args.no_base_question_encodings)
 
-    save_path = f"{REPEAT_Q_PREDS_OUTPUT_DIR}/{ds_name}_predictions.txt"
+    save_path = f"{REPEAT_Q_PREDS_OUTPUT_DIR}/{args.ds_name}_predictions.txt"
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
 
@@ -187,7 +194,7 @@ def translate(model_dir, ds_name, use_pos, use_ner, beam_search_size):
     reverse_voc = _reverse_voc(vocabulary)
     feature_voc = build_vocabulary(config.feature_vocabulary_path)
     data = get_data(
-        data_dir=f"{REPEAT_Q_DATA_DIR}/{ds_name}",
+        data_dir=f"{REPEAT_Q_DATA_DIR}/{args.ds_name}",
         vocabulary=vocabulary,
         feature_vocabulary=feature_voc,
         data_limit=-1,
@@ -203,10 +210,10 @@ def translate(model_dir, ds_name, use_pos, use_ner, beam_search_size):
 
     with open(save_path, mode='w+') as pred_file:
         for feature, labels in data["organic"]:
-            if beam_search_size == 1:
+            if args.beam_search_size == 1:
                 preds, _ = model.get_actions(feature, None, training=False, phase=RepeatQTrainer.supervised_phase)
             else:
-                preds = model.beam_search(feature, beam_search_size=beam_search_size)
+                preds = model.beam_search(feature, beam_search_size=args.beam_search_size)
             for label, base_question, facts, pred in zip(labels, feature["base_question"], feature["facts"], preds):
                 translated = remove_adjacent_duplicate_grams(to_string(pred))
                 tf.print("Base question: ", to_string(base_question))
@@ -345,11 +352,14 @@ def preprocess(data_dirpath, save_dir, ds_name, voc_size, pretrained_embeddings_
 
 if __name__ == '__main__':
     logging.getLogger(__name__).setLevel(logging.NOTSET)
-    os.environ["CUDA_VISIBLE_DEVICES"] = "12"
+
     parser = argparse.ArgumentParser()
     parser.add_argument("action", default="train", type=str, choices=("translate", "preprocess", "train"))
-    parser.add_argument("-save_dir", help="Used if action is preprocess. Base directory where the processed files will "
+    parser.add_argument("-save_data_dir", help="If action is preprocess, base directory where the processed files will "
                                           "be saved.", type=str, required=False, default=REPEAT_Q_DATA_DIR)
+    parser.add_argument("-save_model_dir", help="If action is train, name of the directory to save the checkpoints "
+                                          "to (only the name of it, not the full path which is predetermined)",
+                        type=str, default=None)
     parser.add_argument("-ds_name", help="Name of the dataset directory to work with. It will be looked for at the "
                                          "dedicated path in th project files. Please check the README to know where "
                                          "to place your dataset(s).",
@@ -392,7 +402,7 @@ if __name__ == '__main__':
                              "dataset.")
     parser.add_argument("-nb_epochs", type=int, default=20, help="Total number of epochs to train for.", required=False)
     parser.add_argument("-beam_search_size", type=int, default=5, help="Beam search size to use during translation.")
-    parser.add_argument("-model_checkpoint_name", type=str, required=False, default=None,
+    parser.add_argument("-checkpoint_name", type=str, required=False, default=None,
                         help="Name of a checkpoint of the model to resume from. When in translate mode, the model"
                              "will be loaded and directly used to make predictions. When in train or train_rl mode,"
                              " training will resume from the checkpoint and continue with the provided parameters.")
@@ -402,35 +412,30 @@ if __name__ == '__main__':
                                                                   "With this option activated we will run as many "
                                                                   "epochs as the sum of the number of synthetic and "
                                                                   "organic epochs.")
+    parser.add_argument("--reduced_ner_indicators", action="store_true",
+                        help="Whether to differentiate between the answer indicator and the other named entities from"
+                             " the base question.")
+    parser.add_argument("--no_base_question_encodings", action="store_true",
+                        help="Use directly the base question embeddings in place of the base question encodings ("
+                             "generated by the encoder RNN network)")
+    parser.add_argument("--no_glove", action="store_true", help="Randomly initialize embedding matrix instead of using"
+                                                                " pretrained GloVe embeddings.")
+    parser.add_argument("-gpu_id", type=str, help="ID of the GPU to use.", default="0")
     args = parser.parse_args()
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 
     use_pos = not args.no_pos_features
     use_ner = not args.no_ner_indicators
     if args.action == "train":
-        train(
-            ds_name=args.ds_name,
-            data_limit=args.data_limit,
-            batch_size=args.batch_size,
-            learning_rate=args.learning_rate,
-            org_supervised_epochs=args.org_supervised_epochs,
-            synth_supervised_epochs=args.synth_supervised_epochs,
-            checkpoint_name=args.model_checkpoint_name,
-            save_model=args.save_model,
-            recurrent_dropout=args.recurrent_dropout_rate,
-            attention_dropout=args.attention_dropout_rate,
-            dropout_rate=args.dropout_rate,
-            use_pos=use_pos,
-            use_ner=use_ner,
-            mixed_data=args.mixed_data
-        )
+        train(args)
         info("Training completed.")
     elif args.action == "preprocess":
         assert all(arg is not None for arg in (args.save_dir, args.ds_name))
-        preprocess(args.preprocess_data_dir, args.save_dir, args.ds_name, args.voc_size,
+        preprocess(args.preprocess_data_dir, args.save_data_dir, args.ds_name, args.voc_size,
                    args.pretrained_embeddings_path)
         info("Preprocessing completed successfully.")
     elif args.action == "translate":
-        assert args.model_checkpoint_name is not None and args.ds_name is not None
-        translate(f"{REPEAT_Q_TRAIN_CHECKPOINTS_DIR}/{args.model_checkpoint_name}", args.ds_name, use_ner, use_pos,
-                  args.beam_search_size)
+        assert args.checkpoint_name is not None and args.ds_name is not None
+        translate(f"{REPEAT_Q_TRAIN_CHECKPOINTS_DIR}/{args.checkpoint_name}", args)
         info("Translation completed.")

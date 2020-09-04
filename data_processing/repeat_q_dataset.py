@@ -20,7 +20,8 @@ class RepeatQDataset:
                  pad_id=0,
                  data_limit=-1,
                  use_pos_features=True,
-                 use_ner_features=True):
+                 use_ner_features=True,
+                 reduced_ner_indicators=False):
         """
         Dataset to use in conjunction with the RepeatQ model.
         :param ds_json_path: Path to a JSON file containing facts, base questions and target questions.
@@ -42,6 +43,7 @@ class RepeatQDataset:
         self.pad_id = pad_id
         self.use_pos_features = use_pos_features
         self.use_ner_features = use_ner_features
+        self.reduced_ner_indicators = reduced_ner_indicators
         self.ds = self.read_dataset(data_limit)
 
     def read_dataset(self, data_limit):
@@ -106,6 +108,8 @@ class RepeatQDataset:
         return [self.vocab.get(word.lower(), self.vocab[self.unk_token]) for word in sentence]
 
     def features_to_ids(self, feature: RepeatQFeature):
+        if self.reduced_ner_indicators:
+            feature.entity_tags = feature.entity_tags.replace("BA", "BN").replace("IA", "IN")
         if self.use_pos_features:
             pos_features = [self.feature_vocab[tag] for tag in feature.pos_tags.split()]
         else:

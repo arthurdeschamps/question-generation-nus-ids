@@ -50,13 +50,17 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         self.origin_probs_layer = tf.keras.layers.Dense(units=3, name="origin_probs_layer", activation="softmax")
         self.origin_probs_layer_dropout = tf.keras.layers.Dropout(self.config.dropout_rate, name="origin_probs_dropout")
 
-        # Base question encoder
-        self.base_question_encoder = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
-            units=int(self.config.decoder_hidden_size / 2),
-            recurrent_dropout=1e-9,
-            dropout=0.5,
-            return_sequences=True,
-        ), merge_mode="concat", name="base_question_encoder")
+        if config.with_question_encodings:
+            # Base question encoder
+            self.base_question_encoder = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
+                units=int(self.config.decoder_hidden_size),
+                recurrent_dropout=1e-9,
+                dropout=0.5,
+                return_sequences=True,
+                return_state=True
+            ), merge_mode="concat", name="base_question_encoder")
+        else:
+            self.base_question_encoder = None
 
         if config.restore_supervised_checkpoint:
             path = config.supervised_model_checkpoint_path
@@ -110,7 +114,13 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
     def get_initial_state(self, base_question, base_question_features, facts, facts_features, batch_size,
                           training=None):
         base_question_embeddings = self.embedding_layer({"sentence": base_question, "features": base_question_features})
-        base_question_encodings = self.base_question_encoder(base_question_embeddings)
+        if self.base_question_encoder is None:
+            base_question_encodings = base_question_embeddings
+            initial_hidden_state = tf.zeros((batch_size, self.config.decoder_hidden_size))
+        else:
+            base_question_encodings, forward_h, _, backward_h, _ = self.base_question_encoder(base_question_embeddings)
+            # Use the last hidden state of the question encoder as initial state
+            initial_hidden_state = backward_h
         facts_embeddings = self.embedding_layer({"sentence": facts, "features": facts_features})
         facts_encodings = self.fact_encoder(facts_embeddings, training=training)
 
@@ -119,10 +129,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             base_question_encodings=base_question_encodings,
             facts=facts,
             facts_encodings=facts_encodings,
-            decoder_states=(
-                base_question_encodings[:, -1],  # Use the last hidden state of the question encoder as initial state
-                tf.zeros(shape=(batch_size, self.config.decoder_hidden_size))
-            ),
+            decoder_states=(initial_hidden_state, tf.zeros(shape=(batch_size, self.config.decoder_hidden_size))),
             observation=tf.zeros(shape=(batch_size,), dtype=tf.int32),
             is_first_step=True
         )

@@ -105,9 +105,9 @@ class Decoder(tf.keras.layers.Layer):
         return logits, (hidden_state, carry_state), (base_question_attention_vector, base_question_attention_logits), \
                (facts_attention_vector, facts_attention_logits)
 
-    def _output_layer(self, hidden_state, previous_input, base_question_attention_vector, training=None):
+    def _output_layer(self, hidden_state, decoder_input, base_question_attention_vector, training=None):
         r_t = self.W_r(self.W_r_dropout(hidden_state)) + \
-              self.U_r(self.U_r_dropout(previous_input)) + \
+              self.U_r(self.U_r_dropout(decoder_input)) + \
               self.V_r(self.V_r_dropout(base_question_attention_vector))
         maxout = self.maxout(r_t)
         logits = self.W_y(self.W_y_dropout(maxout, training=training))

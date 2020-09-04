@@ -56,7 +56,7 @@ class Embedding(tf.keras.layers.Layer):
             if embedding_size is None:
                 raise ValueError("Please pass the embedding size if learning the embedding matrix.")
             embedding_matrix = tf.Variable(
-                shape=(len(vocabulary), embedding_size),
+                initial_value=tf.initializers.GlorotUniform()(shape=(len(vocabulary), embedding_size), dtype=tf.float32),
                 trainable=True,
                 name=var_name
             )

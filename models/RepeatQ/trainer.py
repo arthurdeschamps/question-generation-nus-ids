@@ -40,7 +40,7 @@ class RepeatQTrainer:
 
     def train(self):
         env = self._build_environment()
-        model_save_dir = RepeatQTrainer.prepare_model_save_dir()
+        model_save_dir = self._prepare_model_save_dir()
 
         def train(nb_epochs, data, dev_data, ds_type):
             tf.print("About to start training for ", nb_epochs, " epochs with ", ds_type, " dataset.")
@@ -76,7 +76,7 @@ class RepeatQTrainer:
             loss, tape = self._reinforce_step(features, labels, environment)
         else:
             loss, tape = self._supervised_step(features, labels)
-        tf.print("Dataset:", ds_type, "/ Epoch:", epoch + 1, "/ Loss:", loss, "\n")
+        tf.print("Dataset:", ds_type, "/ Epoch:", epoch + 1, "/ Perplexity:", tf.pow(loss, 2), "\n")
         gradients = tape.gradient(loss, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         return loss
@@ -236,6 +236,15 @@ class RepeatQTrainer:
             _debug_output(fact, f"Fact {i}")
         return 0
 
+    def _prepare_model_save_dir(self):
+        model_dir = f"{TRAINED_MODELS_DIR}/repeat_q/"
+        if self.config.save_directory_name is not None:
+            model_dir += f"{self.config.save_directory_name}/"
+        if not os.path.exists(model_dir):
+            info(f"Creating model saving directory: {model_dir}.")
+            Path(model_dir).mkdir(parents=False)
+        return model_dir
+
     @staticmethod
     def _get_policy_gradient(rewards, log_probs, episode_probs, mask):
         discount_factor = 0.9
@@ -262,11 +271,3 @@ class RepeatQTrainer:
     @staticmethod
     def ids_to_words(ids, ids_to_words_voc):
         return " ".join(ids_to_words_voc[id_] for id_ in ids)
-
-    @staticmethod
-    def prepare_model_save_dir():
-        model_dir = f"{TRAINED_MODELS_DIR}/repeat_q/"
-        if not os.path.exists(model_dir):
-            info(f"Creating model saving directory: {model_dir}.")
-            Path(model_dir).mkdir(parents=False)
-        return model_dir
