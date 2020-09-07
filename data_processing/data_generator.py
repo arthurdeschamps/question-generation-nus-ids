@@ -17,7 +17,7 @@ from data_processing.utils import array_to_string
 from defs import NQG_MODEL_DIR, NQG_DATA_HOME, MEDQUAD_DIR, MEDQUAD_DEV, MEDQUAD_TRAIN, \
     MEDQA_HANDMADE_FILEPATH, MEDQA_HANDMADE_RAW_DATASET_FILEPATH, HOTPOT_QA_DEV_JSON, \
     HOTPOT_QA_DEV_TARGETS_PATH, REPEAT_Q_RAW_DATASETS, ASS2S_PROCESSED_SQUAD_MPQG_DATA, REPEAT_Q_SQUAD_DATA_DIR, \
-    NQG_SQUAD_DATASET, SQUAD_REWRITE_MTURK_DIR, SQUAD_REWRITES_SYNTHETIC_JSON, ASS2S_PROCESSED_DIR
+    NQG_SQUAD_DATASET, SQUAD_REWRITE_MTURK_DIR, SQUAD_REWRITES_SYNTHETIC_JSON, ASS2S_PROCESSED_DIR, REPEAT_Q_DATA_DIR
 
 from data_processing.nqg_dataset import NQGDataset
 from data_processing.pre_processing import NQGDataPreprocessor
@@ -72,18 +72,21 @@ def generate_ass2s_mpqg_features(ds_name):
         _generate_features(*ds_train.get_dataset(), "train")
         _generate_features(c_dev, a_dev, q_dev, "dev")
         _generate_features(c_test, a_test, q_test, "test")
-    elif "squad_repeat_q" in ds_name:
+    elif "squad" in ds_name:
+        use_triples = "triples" in ds_name
+        mapped_triples = "mapped" in ds_name
         processed_mpqg_data_dir = f"{ASS2S_PROCESSED_DIR}/{ds_name}"
         tokenize = stanza.Pipeline(processors="tokenize")
         modes = ("test", "dev", "train")
         question_to_answers = {}
+        if not use_triples:
+            for mode in modes:
+                with open(f"{ASS2S_PROCESSED_SQUAD_MPQG_DATA}/{mode}_sent_pre.json") as data_file:
+                    for data in tqdm(json.load(data_file)):
+                        base_question = " ".join(word.text.lower() for word in tokenize(data["annotation2"]).iter_words())
+                        question_to_answers[base_question] = data["annotation3"].lower()
         for mode in modes:
-            with open(f"{ASS2S_PROCESSED_SQUAD_MPQG_DATA}/{mode}_sent_pre.json") as data_file:
-                for data in tqdm(json.load(data_file)):
-                    base_question = " ".join(word.text.lower() for word in tokenize(data["annotation2"]).iter_words())
-                    question_to_answers[base_question] = data["annotation3"].lower()
-        for mode in modes:
-            data_dir = REPEAT_Q_SQUAD_DATA_DIR
+            data_dir = f"{REPEAT_Q_DATA_DIR}/{ds_name}"
             with open(f"{data_dir}/{mode}.data.json") as data_file:
                 examples = json.load(data_file)
 
@@ -108,22 +111,38 @@ def generate_ass2s_mpqg_features(ds_name):
                 if mode == "test" and example["is_synthetic"]:
                     continue
                 bq = example["base_question"]
-                if bq not in question_to_answers:
-                    print(f"Missing: {bq}")
-                    continue
                 bq_ners = get_ners(example["base_question_ner"], bq)
                 facts = example["facts"]
                 facts_ners = [get_ners(fact_ner, fact) for fact_ner, fact in zip(example["facts_ner"], facts)]
                 flattened_facts_ners = [ner for fact_ners in facts_ners for ner in fact_ners ]
                 context = bq + " gsdassep " + " ".join(facts)
                 context_ners = bq_ners + [{"entity": "gsdassep", "ent_type": "GSDASSEP"}] + flattened_facts_ners
+                if (use_triples and mapped_triples) or bq not in question_to_answers:
+                    answer = facts_ners[0][0]["entity"] if len(facts_ners[0]) > 0 else facts[0]
+                    for fact_ner in facts_ners[0]:
+                        if fact_ner["entity"] in facts[0]:
+                            answer = fact_ner["entity"]
+                            break
+                else:
+                    original_answer = question_to_answers[bq]
+                    found = False
+                    for fact_ners in facts_ners:
+                        if not found:
+                            for fact_ner in fact_ners:
+                                if fact_ner in original_answer or fact_ner in bq_ners:
+                                    answer = fact_ner
+                                    found = True
+                                    break
+                    if not found:
+                        print(f"No matching entity found for: \"{original_answer}. {base_question}\"")
+                        continue
                 feature = {
                     "annotation1": {
                         "toks": context,
                         "NERs": context_ners
                     },
                     "annotation2": example["target"],
-                    "annotation3": question_to_answers[bq]
+                    "annotation3": answer
                 }
                 if example["is_synthetic"]:
                     synthetic_examples.append(feature)
@@ -330,7 +349,6 @@ def generate_hotpot_targets(json_data_path, savepath):
 
 
 def generate_repeat_q_squad_raw(use_triples: bool, mapped_triples: bool):
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     nlp = stanza.Pipeline(lang='en', processors='tokenize,pos,ner')
 
     question_to_answers_map = get_squad_question_to_answers_map()
@@ -534,7 +552,7 @@ if __name__ == '__main__':
     elif args.dataset_name == "nqg_hotpotqa":
         generate_nqg_features('dev', 'hotpotqa')
         generate_nqg_features('train', 'hotpotqa')
-    elif "repeat_q_squad" in args.dataset_name:
+    elif "squad_repeat_q" in args.dataset_name:
         use_triples = False
         mapped_triples = False
         if "triples" in args.dataset_name:

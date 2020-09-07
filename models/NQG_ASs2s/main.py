@@ -117,6 +117,7 @@ def get_params(training):
     if training:
         model_params['beam_width'] = 0
     model_params["voca_size"] = FLAGS.voca_size
+    model_params["batch_size"] = FLAGS.batch_size
 
     # Add embedding path to model_params
     model_params['embedding'] = FLAGS.embedding

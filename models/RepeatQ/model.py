@@ -55,7 +55,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             self.base_question_encoder = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(
                 units=int(self.config.decoder_hidden_size),
                 recurrent_dropout=1e-9,
-                dropout=0.5,
+                dropout=self.config.dropout_rate,
                 return_sequences=True,
                 return_state=True
             ), merge_mode="concat", name="base_question_encoder")
