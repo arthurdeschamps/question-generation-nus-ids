@@ -10,16 +10,22 @@ class Embedding(tf.keras.layers.Layer):
 
     _logger = logging.getLogger("Embedding")
 
-    def __init__(self, embedding_matrix, *args, **kwargs):
+    def __init__(self, embedding_matrix, nb_bio_tags, nb_pos_tags, *args, **kwargs):
         super(Embedding, self).__init__(*args, **kwargs)
         self.embedding_matrix = embedding_matrix
         self.supports_masking = True
+
+        self.bio_embedding_layer = tf.keras.layers.Embedding(nb_bio_tags, 3, mask_zero=True, name="bio_embeddings")
+        self.pos_embedding_layer = tf.keras.layers.Embedding(nb_pos_tags, 16, mask_zero=True, name="pos_embeddings")
 
     def call(self, inputs, mask=None):
         sentence = inputs["sentence"]
         features = inputs["features"]
         word_embeddings = self.embed_words(sentence)
-        return tf.concat((word_embeddings, features), axis=-1)
+        # Features are given in this order: (pos, bio)
+        pos_embds = self.pos_embedding_layer(features[..., 0])
+        bio_embds = self.bio_embedding_layer(features[..., 1])
+        return tf.concat((word_embeddings, pos_embds, bio_embds), axis=-1)
 
     def embed_words(self, words):
         return tf.nn.embedding_lookup(
@@ -34,7 +40,7 @@ class Embedding(tf.keras.layers.Layer):
         return self.embedding_matrix.shape[1]
 
     @staticmethod
-    def new(vocabulary, is_pretrained, embedding_size, embedding_path, **kwargs):
+    def new(vocabulary, is_pretrained, embedding_size, embedding_path, nb_bio_tags, nb_pos_tags, **kwargs):
         if vocabulary is None:
             raise ValueError("Vocabulary cannot be None")
 
@@ -60,7 +66,7 @@ class Embedding(tf.keras.layers.Layer):
                 trainable=True,
                 name=var_name
             )
-        return Embedding(embedding_matrix=embedding_matrix, **kwargs)
+        return Embedding(embedding_matrix=embedding_matrix, nb_bio_tags=nb_bio_tags, nb_pos_tags=nb_pos_tags, **kwargs)
 
     @staticmethod
     def _load_embedding_matrix(path):

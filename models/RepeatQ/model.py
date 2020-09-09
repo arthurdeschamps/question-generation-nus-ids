@@ -13,6 +13,7 @@ from models.RepeatQ.model_config import ModelConfiguration
 
 
 class RepeatQ(LoggingMixin, tf.keras.models.Model):
+
     NetworkState = namedtuple("NetworkState", (
         "base_question",
         "base_question_encodings",
@@ -26,6 +27,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
     def __init__(self,
                  voc_word_to_id,
                  config: ModelConfiguration,
+                 nb_bio_tags, nb_pos_tags,
                  *args,
                  **kwargs
                  ):
@@ -36,7 +38,7 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         self.question_mark_id = voc_word_to_id["?"]
 
         # Layers construction
-        self.embedding_layer = self._build_embedding_layer()
+        self.embedding_layer = self._build_embedding_layer(nb_bio_tags, nb_pos_tags)
         self.fact_encoder = self._build_fact_encoder()
         self.decoder = self._build_decoder()
 
@@ -432,6 +434,9 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         softmax = numerator / denominator
         return softmax
 
+    def get_config(self):
+        return self.config
+
     def _build_decoder(self):
         question_attention = self._build_attention_layer("base_question_attention")
         facts_attention = self._build_attention_layer("facts_attention")
@@ -464,11 +469,13 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
             name=name
         )
 
-    def _build_embedding_layer(self):
+    def _build_embedding_layer(self, nb_bio_tags, nb_pos_tags):
         return Embedding.new(
             vocabulary=self.vocabulary_word_to_id,
             is_pretrained=self.config.embeddings_pretrained,
             embedding_size=self.config.embedding_size,
             embedding_path=f"{self.config.data_dir}/{REPEAT_Q_EMBEDDINGS_FILENAME}",
+            nb_bio_tags=nb_bio_tags,
+            nb_pos_tags=nb_pos_tags,
             name="embedding_layer"
         )

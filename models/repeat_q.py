@@ -169,22 +169,23 @@ def train(args):
     data_dir = f"{REPEAT_Q_DATA_DIR}/{args.ds_name}"
     data = get_data(data_dir, vocabulary, feature_vocabulary, args.data_limit, config)
     training_data, dev_data, test_data = data["train"], data["dev"], data["test"]
-    model = RepeatQ(vocabulary, config)
+    # Overshooting pos and bio tags for simplicity
+    model = RepeatQ(vocabulary, config, nb_pos_tags=len(feature_vocabulary), nb_bio_tags=len(feature_vocabulary))
     trainer = RepeatQTrainer(config, model, training_data, dev_data, vocabulary)
     trainer.train()
 
 
-def translate(model_dir, args):
+def translate(model_dir, args, prediction_file_name, with_stats=False):
     config = ModelConfiguration\
         .new()\
-        .with_batch_size(32 if args.beam_search_size > 1 else 1)\
+        .with_batch_size(32 if args.beam_search_size > 1 and not with_stats else 1)\
         .with_pos_features(use_pos)\
         .with_ner_features(use_ner)\
         .with_reduced_ner_indicators(args.reduced_ner_indicators)\
         .with_question_encodings(not args.no_base_question_encodings)
 
-    save_path = f"{REPEAT_Q_PREDS_OUTPUT_DIR}/{args.ds_name}_predictions.txt"
-    if not os.path.exists(os.path.dirname(save_path)):
+    save_path = f"{REPEAT_Q_PREDS_OUTPUT_DIR}/{prediction_file_name}_predictions.txt"
+    if not (with_stats or os.path.exists(os.path.dirname(save_path))):
         os.makedirs(os.path.dirname(save_path))
 
     def _reverse_voc(voc):
@@ -201,28 +202,36 @@ def translate(model_dir, args):
         config=config,
         data_modes=["test"]
     )["test"]
-    model = RepeatQ(vocabulary, config)
+    model = RepeatQ(vocabulary, config, nb_bio_tags=len(feature_voc), nb_pos_tags=len(feature_voc))
     model.load_weights(model_dir)
 
     def to_string(tokens, _reverse_voc=reverse_voc):
         tokens = tokens.numpy()
         return " ".join([_reverse_voc[t] for t in tokens]).replace(" <blank>", "")
 
-    with open(save_path, mode='w+') as pred_file:
+    if with_stats:
         for feature, labels in data["organic"]:
-            if args.beam_search_size == 1:
-                preds, _ = model.get_actions(feature, None, training=False, phase=RepeatQTrainer.supervised_phase)
-            else:
-                preds = model.beam_search(feature, beam_search_size=args.beam_search_size)
-            for label, base_question, facts, pred in zip(labels, feature["base_question"], feature["facts"], preds):
-                translated = remove_adjacent_duplicate_grams(to_string(pred))
-                tf.print("Base question: ", to_string(base_question))
-                for fact in facts:
-                    tf.print("Fact: ", to_string(fact))
-                tf.print("Target: ", to_string(label))
-                #tf.print(to_string(label))
-                tf.print("Prediction: ", translated, "\n")
-                pred_file.write(translated + "\n")
+            # cherry picked to show model's behavior on good predictions
+            if to_string(feature["base_question"][0]) == "what year was temüjin , who became genghis khan , likely born ?":
+                model.get_actions(
+                    feature, None, training=False, phase=RepeatQTrainer.supervised_phase, show_attention=True
+                )
+    else:
+        with open(save_path, mode='w+') as pred_file:
+            for feature, labels in data["organic"]:
+                if args.beam_search_size == 1:
+                    preds, _ = model.get_actions(feature, None, training=False, phase=RepeatQTrainer.supervised_phase)
+                else:
+                    preds = model.beam_search(feature, beam_search_size=args.beam_search_size)
+                for label, base_question, facts, pred in zip(labels, feature["base_question"], feature["facts"], preds):
+                    translated = remove_adjacent_duplicate_grams(to_string(pred))
+                    tf.print("Base question: ", to_string(base_question))
+                    for fact in facts:
+                        tf.print("Fact: ", to_string(fact))
+                    tf.print("Target: ", to_string(label))
+                    #tf.print(to_string(label))
+                    tf.print("Prediction: ", translated, "\n")
+                    pred_file.write(translated + "\n")
 
 
 def create_embedding_matrix(pretrained_path, vocab, pad_token, unk_token):
@@ -421,6 +430,7 @@ if __name__ == '__main__':
     parser.add_argument("--no_glove", action="store_true", help="Randomly initialize embedding matrix instead of using"
                                                                 " pretrained GloVe embeddings.")
     parser.add_argument("-gpu_id", type=str, help="ID of the GPU to use.", default=None)
+    parser.add_argument("-prediction_file_name", type=str, required=False, help="Filename for prediction file.")
     args = parser.parse_args()
 
     if args.gpu_id is not None:
@@ -438,5 +448,11 @@ if __name__ == '__main__':
         info("Preprocessing completed successfully.")
     elif args.action == "translate":
         assert args.checkpoint_name is not None and args.ds_name is not None
-        translate(f"{REPEAT_Q_TRAIN_CHECKPOINTS_DIR}/{args.checkpoint_name}", args)
+        if args.prediction_file_name is None:
+            prediction_file_name = args.ds_name
+        else:
+            prediction_file_name = args.prediction_file_name
+        translate(
+            f"{REPEAT_Q_TRAIN_CHECKPOINTS_DIR}/{args.checkpoint_name}", args, prediction_file_name=prediction_file_name
+        )
         info("Translation completed.")
