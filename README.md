@@ -1,7 +1,3 @@
-# TODOs
-- Integrate: SG-DQG, ASs2s and CGC-QG 
-- Update this readme once baseline models are setup
-
 # Question Generation Integrating Knowledge Basis
 ## General Instructions
 Please run the following python code:
@@ -14,7 +10,7 @@ nltk.download('stopwords')
 nltk.download('wordnet')
 nltk.download('averaged_perceptron_tagger')
 ```
-## How to run RepeatQ
+## How to run QPGen
 ### What you will need to provide
 You will need to provide a JSON file containing your whole dataset (train+dev+test) with the following schema:
 ```javascript
@@ -31,8 +27,11 @@ Next, you will need to run `models.repeat_q` in `preprocessing` mode, passing in
 the path to the JSON file mentioned above. This will create a vocabulary file and optionally
 an embedding matrix file for you.
 ### Training
-You can now train the model using `models.repeat_q` in `training` mode, passing as argument
-the folder containing the data files created during the previous step.
+You can now train the model using `models.repeat_q` in `training` mode. Please refer to the arguments' descriptions for
+more information by running:
+```bash
+python -m models.repeat_q --help
+```
 ## Knowledge Graph API
 ### Google Knowledge Graph
 Please store you api key in a file ".gkg_api_key" located at the root directory 
