@@ -24,7 +24,7 @@ from data_processing.pre_processing import NQGDataPreprocessor
 import numpy as np
 
 
-def generate_ass2s_mpqg_features(ds_name):
+def generate_ass2s_mpqg_features(ds_name, regular_squad):
 
     if not os.path.exists(ASS2S_PROCESSED_SQUAD_MPQG_DATA):
         pathlib.Path(ASS2S_PROCESSED_SQUAD_MPQG_DATA).mkdir(parents=True, exist_ok=True)
@@ -43,7 +43,7 @@ def generate_ass2s_mpqg_features(ds_name):
     # 'annotationN' has fields: 'raw_text', 'toks' (tokenized, cases remain untouched for answers and questions and
     # are lower-cased for contexts), 'POSs': ununsed,
     # 'positions': unused, 'NERs': tokens replaced with corresponding NER tag or O
-    if ds_name == "squad":
+    if regular_squad:
         ds_train = MPQGDataset(mode="train")
         ds_test = MPQGDataset(mode="dev")
         c_dev, a_dev, q_dev, c_test, a_test, q_test = ds_test.get_split(0.5)
@@ -72,7 +72,7 @@ def generate_ass2s_mpqg_features(ds_name):
         _generate_features(*ds_train.get_dataset(), "train")
         _generate_features(c_dev, a_dev, q_dev, "dev")
         _generate_features(c_test, a_test, q_test, "test")
-    elif "squad" in ds_name:
+    else:
         use_triples = "triples" in ds_name
         mapped_triples = "mapped" in ds_name
         processed_mpqg_data_dir = f"{ASS2S_PROCESSED_DIR}/{ds_name}"
@@ -151,8 +151,6 @@ def generate_ass2s_mpqg_features(ds_name):
 
             save_data(processed_mpqg_data_dir + "/mpqg_data", mode, synthetic_examples + organic_examples)
             save_data(processed_mpqg_data_dir + "_mturk/mpqg_data", mode, organic_examples)
-    else:
-        raise NotImplementedError(f"Preprocessing for dataset {ds_name} not implemented yet.")
 
 
 def generate_vocabulary_files(dataset_path, bio_path, vocab_size):

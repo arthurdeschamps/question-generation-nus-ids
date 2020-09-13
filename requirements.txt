@@ -1,0 +1,9 @@
+NLTK 3.5
+Numpy 1.18.5
+Pandas 1.0.4
+Pip 20.0.2
+Stanza 1.0.1
+Tensorflow 2.3.0
+TF-agents 0.6.0 (Not used in final model)
+Tqdm 4.46.1
+Transformers 2.9.1 (Not used in final model)

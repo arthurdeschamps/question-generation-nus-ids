@@ -61,8 +61,8 @@ def translate(ds_name, model_name, ass2s_data_dir, voc_size=None):
     run(params)
 
 
-def preprocess(ds_name):
-    generate_ass2s_mpqg_features(ds_name)
+def preprocess(ds_name, regular_squad):
+    #generate_ass2s_mpqg_features(ds_name, regular_squad=regular_squad)
     for data_dir in (f"{ASS2S_PROCESSED_DIR}/{ds_name}", f"{ASS2S_PROCESSED_DIR}/{ds_name}_mturk"):
         process_mpqg_data(data_dir)
         process_embedding(data_dir)
@@ -82,16 +82,21 @@ if __name__ == '__main__':
     parser.add_argument("action", default="translate", type=str, help='What to do (e.g. "translate")',
                         choices=("translate", "preprocess", "train", "eval"))
     parser.add_argument("-ds", help="Which dataset to use for the specified action (e.g \"squad\").", type=str,
-                        choices=("squad", "squad_mapped_triples",
-                                 "squad_mapped_triples_mturk", "squad_mturk",), default="squad")
+                        choices=("squad", "squad_mapped_triples", "squad_mturk", "squad_mapped_triples_mturk"), 
+                        default="squad")
     parser.add_argument("-model", help="Name of the directory containing the model's checkpoints to restore from for"
                                        "evaluation or name of the directory to save the model being trained to",
                         type=str, required=False)
     parser.add_argument("-voc_size", help="Size of the vocabulary to use or used for training.", type=int,
                         required=False, default=None)
     parser.add_argument("-batch_size", help="Batch size for training.", required=False, default=128, type=int)
+    parser.add_argument("--regular_squad", help="Add this flag to process the original SQuAD dataset, as opposed"
+                                                "to SQIDSR.", action="store_true")
+    parser.add_argument("-gpu_id", type=str, help="ID of the GPU to use.", default=None)
 
     args = parser.parse_args()
+    if args.gpu_id is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
     if "squad" == args.ds:
         data_dir = ASS2S_PROCESSED_SQUAD_DIR
     else:
@@ -99,6 +104,6 @@ if __name__ == '__main__':
     if args.action == "translate":
         translate(args.ds, args.model, data_dir, voc_size=args.voc_size)
     elif args.action == "preprocess":
-        preprocess(args.ds)
+        preprocess(args.ds, args.regular_squad)
     elif args.action == "train":
         train(data_dir, model_name=args.model, voc_size=args.voc_size, batch_size=args.batch_size)

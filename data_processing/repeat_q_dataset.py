@@ -68,8 +68,8 @@ class RepeatQDataset:
             base_question = self.words_to_ids(example.base_question.split())
             base_questions.append(base_question)
             base_questions_features.append(self.features_to_ids(example.base_question_features))
-            facts = [self.words_to_ids(fact.split(' ')) for fact in example.facts]
-            facts_features.append([self.features_to_ids(fact_features) for fact_features in example.facts_features])
+            facts = [self.words_to_ids(fact.split(' ')) for fact in example.facts][:3]
+            facts_features.append([self.features_to_ids(fact_features) for fact_features in example.facts_features][:3])
             max_fact_length = max(max_fact_length, max(len(fact) for fact in facts))
             max_nb_facts = max(max_nb_facts, len(facts))
             facts_list.append(facts)
@@ -78,7 +78,7 @@ class RepeatQDataset:
         base_questions = self.sequence_padding(base_questions)
         targets = self.sequence_padding(targets)
         is_from_base_question = self.sequence_padding(is_from_base_question)
-        facts_list = np.array(self.matrix_padding(facts_list, max_length=max_fact_length, max_width=max_nb_facts))
+        facts_list = np.array(self.matrix_padding(facts_list, max_length=32, max_width=max_nb_facts))
 
         for k in range(len(self.ds)):
             base_question = base_questions[k]

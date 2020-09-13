@@ -1,0 +1,239 @@
+Bad
+Base question:  what comedy featuring stand up comedian tim allen debuted in 1991 ?
+Fact:  timothy alan dick an american actor and comedian
+Target:  what abc comedy featuring american stand up comedian and actor timothy alan dick debuted in 1991 ?
+Prediction:  what comedy featuring stand comedian american dick and comedian timothy dick debuted in 1991 ?
+
+Good
+Base question:  what degree did martin luther receive on 19 october , 1512 ?
+Fact:  martin luther , o.s.a. was a german professor of theology , composer , priest , augustinian monk , and a seminal figure in the protestant reformation .
+Target:  what degree did the composer , priest and augustinian monk martin luther receive on 19 october , 1512 ?
+Prediction:  what degree did martin luther , a german professor of theology , composer , priest monk augustinian and augustinian , receive on 19 october , 1512 ?
+
+No changes
+Base question:  what does the wessel - datteln canal run parallel to ?
+Fact:  lippe a kreis - <unk> - district - <unk> - in the east of north rhine - westphalia , germany
+Target:  in germany , what is a infamous canal that is in a neighboring district of herford ?
+Prediction:  what does the wessel - datteln canal run parallel to ?
+
+Neutral
+Base question:  how many miles south of san jose is the north - south midway point located ?
+Fact:  san jose , officially the city of san josé , the cultural , financial , and political center of silicon valley
+Target:  how many miles south of silicon valleys ' san jose is the north - south midway point located ?
+Prediction:  how many miles south of san jose , the center of silicon , is the north - south midway point located ?
+
+Neutral
+Base question:  what percentage of scotland 's voting population failed to actually vote ?
+Fact:  scotland a 96 mile border with england to the southeast
+Target:  what percentage of the country with a 96 mile border with england 's voting population failed to actually vote ?
+Prediction:  what percentage of scotland 's , a 96 mile border with england , voting population failed to actually vote ?
+
+Good
+Base question:  who wanted israel to withdraw from its border ?
+Fact:  israel the state of israel
+Target:  who wanted the state of israel to withdraw from its border ?
+Prediction:  who wanted the state of israel to withdraw from its border ?
+
+Bad
+Base question:  what market other than harrogate , cheltenham , bath , inner london , hastings and brighton is overinflated ?
+Fact:  london is the capital and largest city of england and the united kingdom .
+Target:  what market other than harrogate , cheltenham , bath , inner london , the capital and largest city of england , hastings and brighton is overinflated ?
+Prediction:  what market other than harrogate , cheltenham , bath capital , largest capital of england , bath , inner london , hastings and overinflated ?
+
+Good
+Base question:  where were british defeated in canada ?
+Fact:  canada ten provinces and three territories the world 's second - largest country by total area
+Target:  where were british defeated in the world 's second largest country canada ?
+Prediction:  where were british defeated in the world 's second - largest country by total area ?
+
+Fact issue
+Base question:  what is the abc affiliate that serves lima , ohio ?
+Fact:  lima the largest city of peru
+Target:  what is the abc affiliate that serves the largest city of peru ?
+Prediction:  what is the abc affiliate that serves lima , the largest city of peru ?
+
+Bad
+Base question:  what is the population of the second largest city in california ?
+Fact:  california is state in pacific region of united states
+Target:  what is the population of the second largest city in california , in the pacific region of the united states ?
+Prediction:  what is the population of the second largest state of the pacific region of california ?
+
+Fact issue
+Base question:  what team did kubiak play for in super bowl xxi ?
+Fact:  super bowl xxi new york giants
+Target:  what nfl team did gary kubiak play for in super bowl xxi , decided between the afc and nfc ?
+Prediction:  what team did kubiak play for in super new bowl new giants ?
+
+Good
+Base question:  who was in command of the german military forces ?
+Fact:  paul emil von lettow - vorbeck a general
+Target:  which general was in command of the german military forces ?
+Prediction:  what general was command in command german military ?
+
+Good
+Base question:  what year was temüjin , who became genghis khan , likely born ?
+Fact:  genghis khan , also officially genghis emperor , his death
+Target:  in which year was temujin , also known as genghis khan , born ?
+Prediction:  what year was temüjin , who became genghis khan , also officially genghis emperor , likely born ?
+
+Bad
+Base question:  which of the three heavily populated areas has the least number of inhabitants ?
+Fact:  san diego a city in the u.s. state of california on the coast of the pacific ocean
+Target:  which of the three heavily populated u.s. cities has the least number of inhabitants ?
+Prediction:  which of the three heavily populated in california , the of pacific , has the least number of inhabitants ?
+
+Fact issue
+Base question:  what nationality is the architect enric miralles ?
+Fact:  enric miralles
+Target:  what nationality is the architect enric miralles who graduated in 1978 ?
+Prediction:  what nationality is the architect enric , a miralles ?
+
+Good
+Base question:  what is the largest independent library outside of london ?
+Fact:  london england is largest city
+Target:  what is the largest independent library outside of the largest city of england , london ?
+Prediction:  what is the largest independent library outside of the largest city of england ?
+
+Bad
+Base question:  what city in victoria is called the sporting capital of australia ?
+Fact:  melbourne the capital and most populous city of the australian state of victoria
+Target:  what city in victoria , the most populous city of the australian state of victoria , is called the sporting capital of australia ?
+Prediction:  what city in the capital city most victoria is called the sporting capital of australia ?
+
+Fact issue
+Base question:  what microsoft ceo is also an alumni of the university of chicago ?
+Fact:  satya narayana
+Target:  who succeed steve balmer in 2014 and is an alum of the university of chicago ?
+Prediction:  what microsoft ceo is also an alumni of the university of chicago ?
+
+Neutral
+Base question:  what was the incident over taxes at ballarat called ?
+Fact:  ballarat a city located on the yarrowee river in the central highlands of victoria , australia
+Target:  what was the incident over taxes at ballarat city located on the yarrowee river called ?
+Prediction:  what was the incident over taxes at ballarat , a city located on the yarrowee river in victoria , ?
+
+Good
+Base question:  what did kenya reveil in 2030 ?
+Fact:  kenya the republic of kenya
+Target:  what did the republic of kenya reveal in 2030 ?
+Prediction:  what did the republic of kenya reveil in 2030 ?
+
+No changes
+Base question:  what columbia president went to harvard ?
+Fact:  juan manuel santos calderón
+Target:  what columbia president who was the sole recipient of the 2016 nobel peace prize went to harvard ?
+Prediction:  what columbia president went to harvard ?
+
+Good
+Base question:  how did the rocks on the moon compare to those on earth ?
+Fact:  earth is third planet from sun
+Target:  how did the rocks on the moon compare to those on the third planet from the sun , earth ?
+Prediction:  how did the rocks on the moon compare to those on earth , a third planet from sun ?
+
+Good
+Base question:  who was on the receiving end of a 45 - yard pass from cam newton ?
+Fact:  cameron jerrell newton an american football quarterback
+Target:  who was on the receiving end of a 45 - yard pass from american football player cam newton ?
+Prediction:  who was on the receiving end of a 45 - yard pass from american football quarterback newton ?
+
+Good
+Base question:  who was the deputy administrator of nasa in 1960 ?
+Fact:  the national aeronautics and space administration an independent agency of the united states federal government responsible for the civilian space program , as well as aeronautics and space research
+Target:  who was the deputy administrator of nasa , an independent agency of the united states federal government in 1960 ?
+Prediction:  who was the deputy administrator of the national agency of space in 1960 ?
+
+Bad
+Base question:  when was gold found near ballarat ?
+Fact:  ballarat a city located on the yarrowee river in the central highlands of victoria , australia
+Target:  when was gold found near ballarat , a city located on the yarrowee river in australia ?
+Prediction:  when was gold found near ballarat , on city yarrowee ?
+
+Good
+Base question:  what archdiocese is warsaw the seat of ?
+Fact:  warsaw is the capital and largest city of poland .
+Target:  what archdiocese is warsaw the capital city of poland the seat of ?
+Prediction:  what archdiocese is warsaw , the capital and largest city of poland , the seat of ?
+
+Good
+Base question:  when was gold found near ballarat ?
+Fact:  ballarat is city located on yarrowee river in central highlands of victoria
+Target:  when was gold found near the city of ballarat in victoria , australia ?
+Prediction:  when was gold found near ballarat , a city located on the yarrowee river in the central highlands of victoria ?
+
+Good
+Base question:  what year did the khwarezmian empire fall to genghis khan ?
+Fact:  genghis khan , also officially genghis emperor , genghis khan
+Target:  genghis khan defeated the khwarezmian empire in which year ?
+Prediction:  what year did the khwarezmian empire fall to genghis khan , also officially genghis emperor ?
+
+Fact issue
+Base question:  who was at the receiving end of a 22 - yard pass from peyton manning ?
+Fact:  peyton williams
+Target:  who was at the receiving end of a 22 - yard pass from peyton williams manning ?
+Prediction:  who was at the receiving end of a 22 - yard pass from peyton manning , which the peyton of ?
+
+Bad
+Base question:  where did abc construct it 's transmitter for its affiliate station in san francisco ?
+Fact:  san francisco the cultural , commercial , and financial center of northern california
+Target:  what did abc make for its station in san francisco and the financial center ?
+Prediction:  where did abc construct it 's transmitter for its affiliate station in the francisco center of san francisco ?
+
+Bad
+Base question:  what proclamation gave huguenots special privileges in brandenburg ?
+Fact:  brandenburg the fifth - largest german state by area and the tenth - most populous
+Target:  what proclamation gave huguenots special privileges in the german state of brandenburg ?
+Prediction:  what proclamation gave the fifth - largest german state by area and the tenth - most populous ?
+
+No changes
+Base question:  what alumni wrote " the closing of the american mind " ?
+Fact:  allan david bloom studied under leo strauss
+Target:  what alumni who studied under leo straus wrote " the closing of the american mind " ?
+Prediction:  what alumni wrote " the closing of the american mind " ?
+
+Bad
+Base question:  which nasa faction came around first to support the lor ?
+Fact:  the national aeronautics and space administration an independent agency of the united states federal government responsible for the civilian space program , as well as aeronautics and space research
+Target:  which independent agency of the united states federal government nasa faction came around first to support the lor ?
+Prediction:  which independent , as well as the civilian space program , came around first to support the lor ?
+
+Neutral
+Base question:  what was newcastle named as the most type of city in the uk ?
+Fact:  the newcastle metropolitan area the second most populated area
+Target:  what was newcastle metropolitan area named as the most type of city in the uk ?
+Prediction:  what was newcastle , second populated area the metropolitan populated , named as the most type of city in the uk ?
+
+Fact issue
+Base question:  in sept 1760 who negotiated a capitulation from montreal ?
+Fact:  montreal 1642
+Target:  in sept 1760 who negotiated a capitulation from montreal , canada ?
+Prediction:  in sept 1760 who negotiated a capitulation from montreal , a 1642 ?
+
+Neutral
+Base question:  who was the first warsaw president ?
+Fact:  warsaw is the capital and largest city of poland .
+Target:  who was the first warsaw , the capital and largest city of poland 's president ?
+Prediction:  who was the first warsaw , the capital and largest city of poland ?
+
+Neutral
+Base question:  what was the cost of the other super bowl events in the san francisco area ?
+Fact:  san francisco the cultural , commercial , and financial center of northern california
+Target:  how much are super bowl tickets in northern california particularly san francisco ?
+Prediction:  what was the cost of the other super bowl events in the francisco , cultural financial and center of northern california ?
+
+Bad
+Base question:  where is samuel marsden collegiate school located ?
+Fact:  samuel marsden collegiate school is located in wellington suburb of karori in new zealand
+Target:  where is the samuel marsent collegiate school located in new zealand ?
+Prediction:  where is samuel school collegiate located in the zealand suburb of karori ?
+
+Bad
+Base question:  what is the other country the rhine separates switzerland to ?
+Fact:  austria is landlocked east alpine country in southern part of central europe
+Target:  what is the other central european country the rhine separates switzerland to ?
+Prediction:  what is the other country in rhine separates austria , the landlocked east in the southern part of central europe , ?
+
+Good
+Base question:  what year was temüjin , who became genghis khan , likely born ?
+Fact:  genghis khan , also officially genghis emperor , was the founder and first great khan and emperor of the mongol empire , which became the largest contiguous empire in history after his death .
+Target:  what year was temüjin , who became the first great khan of the mongol empire , likely born ?
+Prediction:  what year was temüjin , who became genghis khan , the founder and first great khan and history of the mongol empire and history of the mongol empire , likely born ?

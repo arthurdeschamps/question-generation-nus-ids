@@ -1,4 +1,5 @@
 import json
+import sys
 
 from evaluating.rouge_score import rouge_l_sentence_level as rouge_l
 import nltk.translate.bleu_score as bleu
@@ -9,9 +10,13 @@ import numpy as np
 from defs import NQG_MEDQUAD_DATASET, NQG_MEDQUAD_PREDS_OUTPUT_PATH, NQG_SQUAD_PREDS_OUTPUT_PATH, \
     NQG_SQUAD_GA_PREDS_OUTPUT_PATH, NQG_SQUAD_NA_PREDS_OUTPUT_PATH, NQG_SQUAD_NER_PREDS_OUTPUT_PATH, \
     NQG_SQUAD_DATASET, NQG_SQUAD_NER_DATASET, NQG_SQUAD_TESTGA_PREDS_OUTPUT_PATH, SG_DQG_HOTPOT_PREDS_PATH, \
-    HOTPOT_QA_DEV_TARGETS_PATH, ASS2S_SQUAD_PREDS_OUTPUT_PATH, ASS2S_PROVIDED_PROCESSED_DATA_DIR, \
-    REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_SQUAD_OUTPUT_FILEPATH, ASS2S_PROCESSED_SQUAD_DIR, SG_DQG_SQUAD_PREDS_PATH
+    REPEAT_Q_SQUAD_DATA_DIR, REPEAT_Q_SQUAD_OUTPUT_FILEPATH, ASS2S_PROCESSED_SQUAD_DIR, SG_DQG_SQUAD_PREDS_PATH, \
+    REPEAT_Q_PREDS_OUTPUT_DIR, ASS2S_PRED_DIR, ASS2S_DIR, ROOT_DIR
+
+sys.path.append(ASS2S_DIR + '/submodule/')
+sys.path.append(f"{ROOT_DIR}/evaluating/coco-caption")
 from mytools import remove_adjacent_duplicate_grams
+from pycocoevalcap.meteor.meteor import Meteor
 
 
 def corpus_f1_score(corpus_candidates, corpus_references):
@@ -41,7 +46,11 @@ def benchmark(corpus_candidates: np.ndarray, corpus_references: np.ndarray):
     print(f"ROUGE-L: {rouge_l_sentence_level}")
     meteor_score = 100 * np.mean(np.array([meteor(references, candidate)
                                      for (references, candidate) in zip(corpus_references, corpus_candidates)]))
-    print(f"METEOR macro average: {meteor_score}")
+    # meteor_score = Meteor().compute_score(
+    #     gts={i: corpus_references[i] for i in range(len(corpus_references))},
+    #     res={i: [corpus_candidates[i]] for i in range(len(corpus_candidates))}
+    # )
+    print(f"METEOR: {meteor_score}")
     f1_score = 100 * corpus_f1_score(corpus_candidates_split, corpus_references_split)
     print(f"F1 macro average: {f1_score}")
 
@@ -88,7 +97,8 @@ if __name__ == '__main__':
 
     models = (
         "nqg_squad", "nqg_squad_ga", "nqg_squad_na", "nqg_squad_ner", "nqg_medquad", "nqg_squad_testga",
-        "sg_dqg_hotpotqa", "ass2s_squad", "sg_dqg_squad", "repeat_q_squad"
+        "sg_dqg_hotpotqa", "ass2s_squad", "sg_dqg_squad", "repeat_q_squad", "repeat_q_squad_mapped_triples",
+        "thesis_bad_example", "repeat_q_squad_mturk", "ass2s_squad_repeat_q_mturk", "ass2s_squad_repeat_q"
     )
 
     import argparse
@@ -153,37 +163,51 @@ if __name__ == '__main__':
             candidates, references = get_sg_dqg_predictions(SG_DQG_SQUAD_PREDS_PATH)
 
     elif "ass2s" in model:
+        candidate_file = ASS2S_PRED_DIR
+        reference_dir = ASS2S_PROCESSED_SQUAD_DIR
         if model == "ass2s_squad":
-            candidates = np.array(pd.read_csv(ASS2S_SQUAD_PREDS_OUTPUT_PATH, header=None, sep='\n')).reshape((-1,))
-            references = np.array(
-                pd.read_csv(f"{ASS2S_PROCESSED_SQUAD_DIR}/filtered_txt/test_question_origin.txt", header=None, sep='\n')
-            ).reshape((-1, 1))
-            assert candidates.shape[0] == references.shape[0]
+            candidate_file += "/squad_original_preds.txt"
+        elif model == "ass2s_squad_repeat_q_mturk":
+            candidate_file += "/squad_mturk_preds.txt"
+            reference_dir = reference_dir.replace("squad", "squad_mturk")
+        elif model == "ass2s_squad_repeat_q":
+            candidate_file += "/squad_preds.txt"
+        else:
+            raise ValueError(f"Model {model} not recognized.")
+
+        candidates = np.array(pd.read_csv(candidate_file, header=None, sep='\n')).reshape((-1,))
+        references = np.array(
+            pd.read_csv(f"{reference_dir}/filtered_txt/test_question_origin.txt", header=None, sep='\n')
+        ).reshape((-1, 1))
+        assert candidates.shape[0] == references.shape[0]
 
     elif "repeat_q" in model:
         if model == "repeat_q_squad":
-            with open(f"{REPEAT_Q_SQUAD_DATA_DIR}/test.data.json", mode='r') as test_file:
-                test_data = json.load(test_file)
-            references = {}
-            candidates = {}
+            target_dir = REPEAT_Q_SQUAD_DATA_DIR
+            prediction_file = f"{REPEAT_Q_PREDS_OUTPUT_DIR}/full_dataset_sentence_facts_predictions.txt"
+        elif model == "repeat_q_squad_mapped_triples":
+            target_dir = f"{REPEAT_Q_SQUAD_DATA_DIR}_mapped_triples"
+            prediction_file = f"{REPEAT_Q_PREDS_OUTPUT_DIR}/mixed_data_predictions.txt"
+        elif model == "repeat_q_squad_mturk":
+            target_dir = REPEAT_Q_SQUAD_DATA_DIR
+            prediction_file = f"{REPEAT_Q_PREDS_OUTPUT_DIR}/mturk_attempts_predictions.txt"
+        else:
+            raise NotImplementedError(f"'{model}' not recognized")
 
-            for data in test_data:
-                q = data["base_question"]
-                # Only keeps organic data for evaluation
-                if data["passage_id"] == -1:
-                    rewrites = references.get(q)
-                    if rewrites is None:
-                        rewrites = [data["target"]]
-                    else:
-                        rewrites.append(data["target"])
-                    references[q] = rewrites
+        with open(f"{target_dir}/test.data.json", mode='r') as test_file:
+            test_data = json.load(test_file)
 
-            base_questions = [k for k, _ in references.items()]
-            references = [v for _, v in references.items()]
-            candidates = np.array(pd.read_csv(
-                REPEAT_Q_SQUAD_OUTPUT_FILEPATH, header=None, sep='\n', comment=None)
-            ).reshape((-1,))
-            # Keeps insertion order and gets rid of duplicates
-            candidates = list({c: None for c in candidates}.keys())
+        references = [[d["target"]] for d in test_data]
+        candidates = np.array(pd.read_csv(prediction_file, header=None, sep='\n', comment=None)).reshape((-1,))
+
+    elif model == "thesis_bad_examples":
+        ref = "when did martin luther , O.S.A. , who was ordained to the priesthood in 1507 , publish his translation of the new testament ?"
+        h1 = "when did publish his translation of the new testament ?"
+        h2 = "augustinian monk martin luther published a new testament of his own translation in year ?"
+
+        benchmark([h1], [[ref]])
+        benchmark([h2], [[ref]])
+
+        exit()
 
     benchmark(candidates, references)

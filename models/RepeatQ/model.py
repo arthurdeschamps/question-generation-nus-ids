@@ -396,13 +396,13 @@ class RepeatQ(LoggingMixin, tf.keras.models.Model):
         question_copy_prob = origin_probs[..., 1:2]
         facts_copy_prob = origin_probs[..., 2:3]
 
-        def zero_out(x):
-            return tf.where(tf.equal(x, 0), tf.zeros_like(x), x)
+        def mask_padding_logits(tokens, logits):
+            return tf.where(tf.equal(tokens, 0), tf.ones_like(logits) * tf.float32.min, logits)
 
         # Prevents copying padding tokens by zero-ing out the logits where 0 tokens are found
-        base_question_logits = zero_out(base_question_logits)
+        base_question_logits = mask_padding_logits(base_question, base_question_logits)
         # Same for facts logits
-        facts_logits = zero_out(facts_logits)
+        facts_logits = mask_padding_logits(flattened_facts, facts_logits)
         base_question_distribution = RepeatQ.stable_softmax(base_question_logits)
         facts_distribution = RepeatQ.stable_softmax(facts_logits)
         copy_distribution = tf.concat((

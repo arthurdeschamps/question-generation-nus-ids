@@ -44,7 +44,7 @@ class Attention(tf.keras.layers.Layer):
             dense_input = self.attention_dropout(attention_input)
             dense_result = self.attention_matrix(dense_input)
             scores = self.attention_vector(tf.math.tanh(dense_result))
-            scores = tf.where(tf.expand_dims(mask, axis=-1), scores, tf.zeros_like(scores, dtype=tf.float32))
+            scores = tf.where(tf.expand_dims(mask, axis=-1), scores, tf.ones_like(scores, dtype=tf.float32) * tf.float32.min)
             if apply_softmax:
                 return tf.math.softmax(scores, axis=-2)
             return scores
